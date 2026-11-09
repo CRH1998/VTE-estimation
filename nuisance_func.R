@@ -55,34 +55,59 @@ nuisance_func <- function(train_data, splits = 2L,
                           randomized = TRUE, pi_hat = 0.5, K = 5L,
                           kernel = .nf_gaussian_kernel, fold_id = NULL,
                           SL.env = NULL) {
+  
+  #-----------------------------------------------------------------------------
+  # 1.0 Validate inputs
+  #-----------------------------------------------------------------------------
+  
+  # Validate train_data
   if (!is.data.frame(train_data) || !all(c("Y", "A") %in% names(train_data)) ||
       anyNA(names(train_data)) || any(!nzchar(names(train_data))) ||
       anyDuplicated(names(train_data))) {
     stop("train_data needs uniquely named columns including Y and A.")
   }
+  
+  
   train_data <- as.data.frame(train_data)
   x_names <- setdiff(names(train_data), c("Y", "A"))
   if (!length(x_names)) stop("Supply at least one covariate.")
+  
+  
+  # Validate covariates, treatment, and outcome
   X <- .nf_covariates(train_data, x_names)
   n <- nrow(X)
   A <- .nf_treatment(train_data$A, n)
   Y <- .nf_values(train_data$Y, n, "Y")
+  
+  
+  #-----------------------------------------------------------------------------
+  # 1.1 Validate other inputs
+  #-----------------------------------------------------------------------------
+  
+  # Validate hal and randomized
   if (!is.logical(hal) || length(hal) != 1L || is.na(hal) ||
       !is.logical(randomized) || length(randomized) != 1L || is.na(randomized)) {
     stop("hal and randomized must each be TRUE or FALSE.")
   }
+  
+  # Validate family
   if (!inherits(family, "family") ||
       !(family$family %in% c("gaussian", "binomial")) ||
       !identical(family$link, if (family$family == "gaussian") "identity" else "logit")) {
     stop("Use gaussian() or binomial() for the outcome family.")
   }
+  
   if (family$family == "binomial" && !all(Y %in% 0:1)) {
     stop("For a binary outcome, code Y as 0 or 1.")
   }
+  
+  # Validate pi_hat when randomized
   if (randomized && (!is.numeric(pi_hat) || length(pi_hat) != 1L ||
                      !is.finite(pi_hat) || pi_hat <= 0 || pi_hat >= 1)) {
     stop("The known treatment probability must be strictly between 0 and 1.")
   }
+  
+  # Validate splits and K
   if (!is.function(kernel)) stop("kernel must be a function.")
   .nf_count(splits, 2L, n, "splits")
   .nf_count(K, if (hal) 3L else 2L, n, "K")
@@ -94,9 +119,11 @@ nuisance_func <- function(train_data, splits = 2L,
              !all(seq_len(splits) %in% fold_id)) {
     stop("fold_id must assign every row once and use every label from 1 to splits.")
   }
+  
   sizes <- tabulate(as.integer(fold_id), nbins = splits)
   if (any(n - sizes < K)) stop("K exceeds the size of a regression sample.")
 
+  # Validate packages, SL.lib and SL.env
   if (hal && !requireNamespace("hal9001", quietly = TRUE)) {
     stop("Install hal9001 to use hal = TRUE.")
   }
@@ -108,6 +135,10 @@ nuisance_func <- function(train_data, splits = 2L,
     if (!is.environment(SL.env)) stop("SL.env must be an environment.")
   }
 
+  
+  #-----------------------------------------------------------------------------
+  # 2.0 Fit nuisance functions in each split
+  #-----------------------------------------------------------------------------
   folds <- lapply(seq_len(splits), function(l) {
     r <- which(fold_id != l)
     m <- which(fold_id == l)
@@ -125,6 +156,10 @@ nuisance_func <- function(train_data, splits = 2L,
     s
   })
 
+  
+  #-----------------------------------------------------------------------------
+  # 3.0 Average over the marginal folds
+  #-----------------------------------------------------------------------------
   weights <- sizes / n
   average <- function(f) {
     values <- lapply(folds, f)
@@ -139,11 +174,57 @@ nuisance_func <- function(train_data, splits = 2L,
        weights = weights, average = average)
 }
 
+
+
+
+
 # Each call has a separate R environment. Only X is passed for the marginal rows.
+#' Title .nf_fit_split
+#'
+#' @param X_reg covariates for the nuisance regressions, one row per observation
+#' @param A_reg treatment for the nuisance regressions, one value per observation
+#' @param Y_reg outcome for the nuisance regressions, one value per observation
+#' @param U covariates for the marginal empirical measure, one row per observation
+#' @param kernel specifies the kernel function k(U, x) for the embedding. 
+#' It must return one numeric value per row of U when x is a one-row data frame.
+#' @param family Family object for the outcome regression, either gaussian() or binomial().
+#' @param hal Boolean indicating whether to use hal9001 for the outcome regression. If FALSE, SuperLearner is used.
+#' @param randomized Boolean indicating whether the treatment is randomized. If TRUE, the known treatment probability pi_hat is used; if FALSE, a treatment model is fitted using SuperLearner.
+#' @param pi_hat Known treatment probability P(A = 1) when randomized is TRUE. Must be strictly between 0 and 1.
+#' @param K Number of internal cross-validation folds for SuperLearner and, if used, HAL. Must be at least 2 (or 3 if hal is TRUE).
+#' @param SL.lib SuperLearner library for the outcome and the unknown propensity. It should be a character vector of SuperLearner wrapper names.
+#' @param SL.env Optional environment for custom SuperLearner wrappers. Defaults to the SuperLearner namespace for its built-in wrappers.
+#'
+#' @returns A list containing the fitted nuisance functions and related quantities for the current split. The list includes:
+#' - mu(a, x): Function to predict the outcome regression for treatment a and covariates x.
+#' - pi(x): Function to predict the treatment probability for covariates x.
+#' - cate(x): Function to compute the conditional average treatment effect for covariates x.
+#' - centred_cate(x): Function to compute the centred conditional average treatment effect for covariates x.
+#' - embedded_cate(x): Function to compute the embedded centred CATE for covariates x.
+#' - residual(a, y, x): Function to compute the weighted residuals for treatment a, outcome y, and covariates x.
+#' - P_X: Empirical measure function for the marginal covariate distribution.
+#' - ate: Scalar representing the average treatment effect (mean of the fitted CATE).
+#' - mean_embedding: Scalar representing the mean of the embedded centred CATE.
+#' - embedding_norm_sq: Scalar representing the squared norm of the embedded centred CATE.
+#' @export
+#'
+#' @examples
 .nf_fit_split <- function(X_reg, A_reg, Y_reg, U, kernel, family, hal,
                           randomized, pi_hat, K, SL.lib, SL.env) {
+  
+  
+  #-----------------------------------------------------------------------------
+  # 1.0 Prepare data and helper functions
+  #-----------------------------------------------------------------------------
+  
   x_names <- names(X_reg)
   as_x <- function(x) .nf_covariates(x, x_names)
+  
+  # Specify the design matrix with treatment interactions for the outcome regression.
+  design <- .nf_design(A_reg, X_reg)
+  
+  
+  # Functions to fit and predict with SuperLearner
   fit_sl <- function(y, x, outcome_family) {
     SuperLearner::SuperLearner(
       Y = y, X = x, family = outcome_family, SL.library = SL.lib,
@@ -154,34 +235,64 @@ nuisance_func <- function(train_data, splits = 2L,
     stats::predict(fit, newdata = x, X = train_x, Y = train_y, onlySL = TRUE)$pred
   }
 
-  # Outcome regression on the regression rows only.
-  design <- .nf_design(A_reg, X_reg)
+  
+  
+  #-----------------------------------------------------------------------------
+  # 2.0 Fit the outcome regression and the treatment model using either HAL or SuperLearner.
+  #-----------------------------------------------------------------------------
+  
   if (hal) {
+    
+    # Fit the outcome regression with HAL, using the design matrix with treatment interactions.
     fit_mu <- hal9001::fit_hal(
       X = as.matrix(design), Y = Y_reg, family = family$family,
       yolo = FALSE, smoothness_orders = 1L, max_degree = 2L,
       num_knots = c(25L, 10L),
       fit_control = list(cv_select = TRUE, use_min = TRUE, nfolds = K,
                          lambda.min.ratio = 1e-4, prediction_bounds = "default")
+      
     )
+    
+    # Define a prediction function for the outcome regression using the fitted HAL model.
     predict_mu <- function(d) {
       stats::predict(fit_mu, new_data = as.matrix(d), type = "response")
     }
+    
   } else {
+    
+    # Fit the outcome regression with SuperLearner, using the design matrix with treatment interactions.
     fit_mu <- fit_sl(Y_reg, design, family)
+    
+    # Define a prediction function for the outcome regression using the fitted SuperLearner model.
     predict_mu <- function(d) predict_sl(fit_mu, d, design, Y_reg)
+    
   }
+  
+  
+  
+  #-----------------------------------------------------------------------------
+  # 3.0 Fit mu(a, x)
+  #-----------------------------------------------------------------------------
   mu <- function(a, x) {
     d <- .nf_design(a, as_x(x))
     .nf_values(predict_mu(d), nrow(d), "Outcome predictions")
   }
+  
+  #-----------------------------------------------------------------------------
+  # 3.1 Fit cate(x) = mu(1, x) - mu(0, x)
+  #-----------------------------------------------------------------------------
   cate <- function(x) mu(1, x) - mu(0, x)
-
+  
+  #-----------------------------------------------------------------------------
+  # 3.2 Fit pi(x)
+  #-----------------------------------------------------------------------------
   # The treatment model uses raw covariates, with no treatment interactions.
   fit_pi <- NULL
   if (randomized) {
+    # If the treatment is randomized, use the known constant treatment probability pi_hat.
     pi <- function(x) rep(pi_hat, nrow(as_x(x)))
   } else {
+    # If the treatment is not randomized, fit a treatment model using SuperLearner with a binomial family.
     fit_pi <- fit_sl(A_reg, X_reg, stats::binomial())
     pi <- function(x) {
       x <- as_x(x)
@@ -190,6 +301,10 @@ nuisance_func <- function(train_data, splits = 2L,
       p
     }
   }
+  
+  #-----------------------------------------------------------------------------
+  # 3.3 Fit the weighted residuals R(z) = (a / pi(x) - (1 - a) / (1 - pi(x))) * (y - mu(a, x))
+  #-----------------------------------------------------------------------------
   residual <- function(a, y, x) {
     x <- as_x(x)
     a <- .nf_treatment(a, nrow(x))
@@ -199,13 +314,19 @@ nuisance_func <- function(train_data, splits = 2L,
     ifelse(a == 1, 1 / p, -1 / (1 - p)) * (y - mu(a, x))
   }
 
-  # Empirical measure and plug-in ATE on the disjoint marginal sample U.
+  #-----------------------------------------------------------------------------
+  # 3.4 Compute the empirical measure, plug-in ATE, and the centred CATE on the marginal sample U.
+  #-----------------------------------------------------------------------------
   P_X <- .nf_empirical_measure(U)
   tau_U <- cate(U)
   ate <- mean(tau_U)
   c_U <- tau_U - ate
   centred_cate <- function(x) cate(x) - ate
 
+  
+  #-----------------------------------------------------------------------------
+  # 3.5 Compute the embedded centred CATE on the marginal sample U.
+  #-----------------------------------------------------------------------------
   # One kernel column at a time. The fitted values c_U are reused for every x.
   embedded_cate <- function(x) {
     x <- as_x(x)
@@ -215,11 +336,24 @@ nuisance_func <- function(train_data, splits = 2L,
     }, numeric(1))
   }
   G_U <- embedded_cate(U)
-  list(mu = mu, pi = pi, cate = cate, centred_cate = centred_cate,
-       embedded_cate = embedded_cate, residual = residual, P_X = P_X, ate = ate,
-       mean_embedding = mean(G_U), embedding_norm_sq = mean(c_U * G_U),
-       fit_mu = fit_mu, fit_pi = fit_pi)
+  
+  
+  list(mu = mu, 
+       pi = pi, 
+       cate = cate, 
+       centred_cate = centred_cate,
+       embedded_cate = embedded_cate, 
+       residual = residual, 
+       P_X = P_X, 
+       ate = ate,
+       mean_embedding = mean(G_U), 
+       embedding_norm_sq = mean(c_U * G_U),
+       fit_mu = fit_mu, 
+       fit_pi = fit_pi)
 }
+
+
+
 
 # The same design is used for observed and counterfactual treatments.
 .nf_design <- function(a, x) {
