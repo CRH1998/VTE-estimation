@@ -1,3 +1,31 @@
+############################################################
+#                                                          #
+#   The following script includes estimation functions     #
+#   for the test of heterogenous effects simulation study  #
+#                                                          #
+############################################################
+
+
+############################################################
+
+# For estimation
+library(glmnet)
+library(SuperLearner)
+library(grf)
+library(hal9001)
+
+# For data wrangling
+library(tidyverse)
+
+
+############################################################
+
+
+############################################################
+#       Function for estimating nuisance parameters        #
+############################################################
+
+
 #' Cross-fitted nuisance estimates for the embedded centred CATE
 #'
 #' Supply only the training data of the current outer split. In inner split l,

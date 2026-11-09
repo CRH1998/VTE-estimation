@@ -1,4 +1,6 @@
 # Testing simulations and nuisance estimation functions
+source("nuisance_func.R")
+source("simulations.R")
 
 
 
@@ -10,7 +12,6 @@ train_data <- sim_SB(n = 1000, V_tau = 0.5, tau = 0.5)
 
 
 
-source("nuisance_func.R")
 
 set.seed(42)
 fit <- nuisance_func(
