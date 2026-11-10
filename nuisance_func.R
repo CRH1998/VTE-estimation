@@ -1,11 +1,40 @@
 ############################################################
 #                                                          #
-#   The following script includes estimation functions     #
-#   for the test of heterogenous effects simulation study  #
+#   The following script includes functions to estimate    #
+#   the nuisance parameters in an outer fold of the        #
+#   cross-fitting procedure. It includes functions to      #
+#   to estimate                                            #
+#     - mu(a, x): Outcome regression for treatment a       #
+#                 and covariates x.                        #
+#     - pi(x): Treatment probability for covariates x.     #
+#     - cate(x): Conditional average treatment effect      #
+#                for covariates x.                         #
+#     - centred_cate(x): Centred conditional average       #
+#                        treatment effect for covariates x.#
+#     - embedded_cate(x): Embedded centred CATE for        # 
+#                         covariates x.                    #
+#     - residual(a, y, x): The weighted residuals R(z)     #
+#                          for treatment a, outcome y,     #
+#                          and covariates x.               #
+#     - P_X: The marginal covariate distribution.          #
+#     - ate: The average treatment effect (mean of         #
+#            the fitted CATE).                             #
+#     - mean_embedding: The mean of the embedded           #
+#                       centred CATE.                      #
+#     - embedding_norm_sq: The squared norm of the         #
+#                          embedded centred CATE           #
+#                          corresponding to the embedded   #
+#                          parameter.                      #
+#                                                          #
+#   The nuisance functions are estimated using either      #
+#   SuperLearner or HAL9001, depending on the user's       #
+#   choice.                                                #
 #                                                          #
 ############################################################
 
 
+############################################################
+#                         Packages                         #
 ############################################################
 
 # For estimation
@@ -19,18 +48,43 @@ library(tidyverse)
 
 
 ############################################################
+#                         Dependencies                     #
+############################################################
 
+# Load helper functions
+source("nf_helpers.R")
+
+# Load kernel functions
+source("kernels.R")
 
 ############################################################
 #       Function for estimating nuisance parameters        #
 ############################################################
 
 
+
+
+
+
+############################################################
+#                                                          #
+#   Function to estimate nuisance functions for the        #
+#   embedded centred CATE with an inner cross-fitting      #
+#   procedure. In particular, it splits the training data  #
+#   into two folds. On one fold it fits the nuisance       #
+#   functions and evaluates them on the other fold which   #
+#   corresponds to training the empirical covariate        #
+#   marginal on a seperate fold.                           #
+#                                                          #
+############################################################
+
 #' Cross-fitted nuisance estimates for the embedded centred CATE
 #'
 #' Supply only the training data of the current outer split. In inner split l,
 #' regressions use rows with fold_id != l and the empirical covariate marginal
 #' uses rows with fold_id == l. Each element of folds has its own fitted models.
+#'
+#' Title nuisance_func
 #'
 #' @param train_data Data frame with numeric Y, binary A (0/1), and finite
 #'   numeric covariates. All columns except Y and A are treated as covariates.
@@ -43,14 +97,14 @@ library(tidyverse)
 #' @param pi_hat Known P(A = 1) when randomized is TRUE.
 #' @param K Number of internal CV folds for SuperLearner and, if used, HAL.
 #' @param kernel Function k(U, x) returning one numeric value per row of U
-#'   when x is a one-row data frame. The default is Gaussian with sigma = 1.
+#'   when x is a one-row data frame. The default is Gaussian with median heuristic bandwidth.
 #' @param fold_id Optional integer labels from 1 to splits, one per training
 #'   row. The default is a balanced random partition independent of the data.
 #' @param SL.env Optional environment for custom SuperLearner wrappers.
 #'   Defaults to the SuperLearner namespace for its built-in wrappers.
 #' @return A list with folds, fold_id, x_names, weights, and average(f).
 #'   Each fold contains its row indices, P_X, fitted models, functions mu(a,x),
-#'   pi(x), cate(x), centred_cate(x), embedded_cate(x), residual(a,y,x),
+#'   pi(x), cate(x), centred_cate(x), embedded_cate(x), residual(z),
 #'   and the scalars ate, mean_embedding, and embedding_norm_sq.
 #'   A covariate vector is one observation. Rows of a matrix or data frame
 #'   are observations. Named inputs are matched to the training covariates.
@@ -67,21 +121,16 @@ library(tidyverse)
 #' x <- data.frame(x1 = c(0, 1), x2 = c(0.5, -0.5))
 #' fit$folds[[1]]$cate(x)
 #' fit$average(function(s) s$embedded_cate(x))
-#'
-#' # Check the two product-measure integrals for the default Gaussian kernel.
-#' s <- fit$folds[[1]]
-#' U <- train[s$marginal_rows, fit$x_names, drop = FALSE]
-#' centred <- s$centred_cate(U)
-#' gram <- exp(-as.matrix(stats::dist(U))^2 / 2)
-#' stopifnot(abs(mean(centred)) < 1e-10,
-#'           isTRUE(all.equal(s$mean_embedding, mean(sweep(gram, 1L, centred, "*")))),
-#'           isTRUE(all.equal(s$embedding_norm_sq, mean(gram * tcrossprod(centred)))))
 #' }
 nuisance_func <- function(train_data, splits = 2L,
                           SL.lib = c("SL.glmnet", "SL.randomForest", "SL.xgboost"),
-                          family = stats::gaussian(), hal = FALSE,
-                          randomized = TRUE, pi_hat = 0.5, K = 5L,
-                          kernel = .nf_gaussian_kernel, fold_id = NULL,
+                          family = stats::gaussian(), 
+                          hal = FALSE,
+                          randomized = TRUE, 
+                          pi_hat = 0.5, 
+                          K = 5L,
+                          kernel = .nf_gaussian_kernel, 
+                          fold_id = NULL,
                           SL.env = NULL) {
   
   #-----------------------------------------------------------------------------
@@ -140,6 +189,7 @@ nuisance_func <- function(train_data, splits = 2L,
   .nf_count(splits, 2L, n, "splits")
   .nf_count(K, if (hal) 3L else 2L, n, "K")
 
+  # Validate fold_id
   if (is.null(fold_id)) {
     fold_id <- sample(rep_len(seq_len(splits), n))
   } else if (!is.numeric(fold_id) || !is.null(dim(fold_id)) ||
@@ -148,6 +198,7 @@ nuisance_func <- function(train_data, splits = 2L,
     stop("fold_id must assign every row once and use every label from 1 to splits.")
   }
   
+  # Validate that each regression sample has at least K observations in each treatment arm.
   sizes <- tabulate(as.integer(fold_id), nbins = splits)
   if (any(n - sizes < K)) stop("K exceeds the size of a regression sample.")
 
@@ -168,17 +219,22 @@ nuisance_func <- function(train_data, splits = 2L,
   # 2.0 Fit nuisance functions in each split
   #-----------------------------------------------------------------------------
   folds <- lapply(seq_len(splits), function(l) {
-    r <- which(fold_id != l)
-    m <- which(fold_id == l)
+    
+    r <- which(fold_id != l)      # Regression sample rows
+    m <- which(fold_id == l)      # Marginal sample rows
+    
     if (length(unique(A[r])) != 2L) {
       stop(sprintf("Regression sample %d needs observations from both treatment arms.", l))
     }
+    
+    # Fit the nuisance functions for the current split using the regression and marginal samples.
     s <- .nf_fit_split(
       X_reg = X[r, , drop = FALSE], A_reg = A[r], Y_reg = Y[r],
       U = X[m, , drop = FALSE], kernel = kernel, family = family,
       hal = hal, randomized = randomized, pi_hat = pi_hat, K = K,
       SL.lib = SL.lib, SL.env = SL.env
     )
+    
     s$regression_rows <- r
     s$marginal_rows <- m
     s
@@ -189,6 +245,7 @@ nuisance_func <- function(train_data, splits = 2L,
   # 3.0 Average over the marginal folds
   #-----------------------------------------------------------------------------
   weights <- sizes / n
+  
   average <- function(f) {
     values <- lapply(folds, f)
     first <- values[[1L]]
@@ -198,15 +255,30 @@ nuisance_func <- function(train_data, splits = 2L,
     if (!all(compatible)) stop("f must return numeric results of the same shape in every split.")
     Reduce(`+`, Map(function(w, v) w * v, weights, values))
   }
-  list(folds = folds, fold_id = fold_id, x_names = x_names,
-       weights = weights, average = average)
+  
+  
+  return(list(folds = folds, fold_id = fold_id, x_names = x_names,
+              weights = weights, average = average))
 }
 
 
 
 
 
-# Each call has a separate R environment. Only X is passed for the marginal rows.
+
+############################################################
+#                                                          #
+#   Function to estimate nuisance functions for the        #
+#   embedded centred CATE in a single inner fold. In       #
+#   particular, it splits the training data into two       #
+#   folds. On one fold it fits the nuisance functions and  #
+#   evaluates them on the other fold which corresponds     #
+#   to training the empirical covariate marginal on a      #
+#   seperate fold.                                         #
+#                                                          #
+############################################################
+
+
 #' Title .nf_fit_split
 #'
 #' @param X_reg covariates for the nuisance regressions, one row per observation
@@ -242,15 +314,20 @@ nuisance_func <- function(train_data, splits = 2L,
   
   
   #-----------------------------------------------------------------------------
-  # 1.0 Prepare data and helper functions
+  # 1.0 Prepare data
   #-----------------------------------------------------------------------------
   
+  # Prepare and validate covariates
   x_names <- names(X_reg)
   as_x <- function(x) .nf_covariates(x, x_names)
   
   # Specify the design matrix with treatment interactions for the outcome regression.
   design <- .nf_design(A_reg, X_reg)
   
+  
+  #-----------------------------------------------------------------------------
+  # 2.0 Fit the outcome regression and the treatment model using either HAL or SuperLearner.
+  #-----------------------------------------------------------------------------
   
   # Functions to fit and predict with SuperLearner
   fit_sl <- function(y, x, outcome_family) {
@@ -262,12 +339,7 @@ nuisance_func <- function(train_data, splits = 2L,
   predict_sl <- function(fit, x, train_x, train_y) {
     stats::predict(fit, newdata = x, X = train_x, Y = train_y, onlySL = TRUE)$pred
   }
-
   
-  
-  #-----------------------------------------------------------------------------
-  # 2.0 Fit the outcome regression and the treatment model using either HAL or SuperLearner.
-  #-----------------------------------------------------------------------------
   
   if (hal) {
     
@@ -295,8 +367,6 @@ nuisance_func <- function(train_data, splits = 2L,
     predict_mu <- function(d) predict_sl(fit_mu, d, design, Y_reg)
     
   }
-  
-  
   
   #-----------------------------------------------------------------------------
   # 3.0 Fit mu(a, x)
@@ -353,150 +423,70 @@ nuisance_func <- function(train_data, splits = 2L,
 
   
   #-----------------------------------------------------------------------------
-  # 3.5 Compute the embedded centred CATE on the marginal sample U.
+  # 3.5 Compute embedded parameters on the marginal sample U.
   #-----------------------------------------------------------------------------
-  # One kernel column at a time. The fitted values c_U are reused for every x.
-  embedded_cate <- function(x) {
-    x <- as_x(x)
-    vapply(seq_len(nrow(x)), function(j) {
-      column <- .nf_values(kernel(U, x[j, , drop = FALSE]), nrow(U), "Kernel column")
-      mean(column * c_U)
-    }, numeric(1))
+  # Reduce columns k(U, point) without storing an m-by-m Gram matrix.
+  kernel_column <- function(rows, point) {
+    .nf_values(kernel(rows, point), nrow(rows), "Kernel column")
   }
-  G_U <- embedded_cate(U)
+  
+  marginal_columns <- function(points, f, prototype = numeric(1)) {
+    vapply(seq_len(nrow(points)), function(j) {
+      f(kernel_column(U, points[j, , drop = FALSE]))
+    }, prototype)
+  }
+  
+  #-----------------------------------------------------------------------------
+  # 3.5.1 Compute embedded cate on the marginal sample U.
+  #-----------------------------------------------------------------------------
+  # Define the embedded centred CATE as the mean of the kernel-weighted centred CATE over the marginal sample U.
+  cate_average <- function(column) mean(column * c_U)
+  embedded_cate <- function(x) marginal_columns(as_x(x), cate_average)
+  
+  # Cache both marginal sums in the same pass over all ordered pairs in U.
+  means_on_U <- marginal_columns(U, function(column) {
+    c(kernel = mean(column), cate = cate_average(column))
+  }, c(kernel = 0, cate = 0))
+  
+  G_U <- means_on_U["cate", ]
   
   
-  list(mu = mu, 
+  #-----------------------------------------------------------------------------
+  # 3.5.2 Compute mean of the kernel on the marginal sample U.
+  #-----------------------------------------------------------------------------
+  mean_UU <- mean(means_on_U["kernel", ])
+  
+  
+  #-----------------------------------------------------------------------------
+  # 3.6 Compute centred kernel on the marginal sample U.
+  #-----------------------------------------------------------------------------
+  centred_kernel <- function(x, y) {
+    x <- as_x(x)
+    y <- as_x(y)
+    mean_Ux <- marginal_columns(x, mean)
+    mean_Uy <- marginal_columns(y, mean)
+    drop(vapply(seq_len(nrow(y)), function(j) {
+      kxy_j <- kernel_column(x, y[j, , drop = FALSE])
+      kxy_j - mean_Ux - mean_Uy[j] + mean_UU
+    }, numeric(nrow(x))))
+  }
+  
+  
+  return(list(mu = mu, 
        pi = pi, 
        cate = cate, 
        centred_cate = centred_cate,
        embedded_cate = embedded_cate, 
+       centred_kernel = centred_kernel,
        residual = residual, 
        P_X = P_X, 
        ate = ate,
        mean_embedding = mean(G_U), 
        embedding_norm_sq = mean(c_U * G_U),
        fit_mu = fit_mu, 
-       fit_pi = fit_pi)
+       fit_pi = fit_pi))
 }
 
 
 
 
-# The same design is used for observed and counterfactual treatments.
-.nf_design <- function(a, x) {
-  a <- .nf_treatment(a, nrow(x))
-  interactions <- as.matrix(x) * a
-  d <- data.frame(A = a, x, interactions, check.names = FALSE)
-  names(d) <- make.names(c("A", names(x), paste0("A_", names(x))), unique = TRUE)
-  d
-}
-
-.nf_covariates <- function(x, x_names) {
-  if (is.null(dim(x))) {
-    if (!is.numeric(x) || length(x) != length(x_names)) {
-      stop("A covariate vector must describe one observation with all features.")
-    }
-    x <- matrix(x, nrow = 1L, dimnames = list(NULL, names(x)))
-  }
-  if (!(is.matrix(x) || is.data.frame(x)) || nrow(x) == 0L) {
-    stop("Use a vector, matrix, or data frame with at least one observation.")
-  }
-  if (is.null(colnames(x))) {
-    if (ncol(x) != length(x_names)) stop("Wrong number of unnamed covariates.")
-    colnames(x) <- x_names
-  }
-  if (anyDuplicated(colnames(x)) || !all(x_names %in% colnames(x))) {
-    stop("Named inputs must contain each training covariate exactly once.")
-  }
-  x <- as.data.frame(x, optional = TRUE)[x_names]
-  ok <- vapply(x, function(v) is.numeric(v) && is.null(dim(v)) && all(is.finite(v)), logical(1))
-  if (!all(ok)) stop("Use finite numeric covariates. Encode categorical features first.")
-  x
-}
-
-.nf_count <- function(x, lower, upper, label) {
-  if (!is.numeric(x) || length(x) != 1L || !is.finite(x) ||
-      x != floor(x) || x < lower || x > upper) {
-    stop(sprintf("%s must be a whole number between %d and %d.", label, lower, upper))
-  }
-}
-
-.nf_treatment <- function(a, n) {
-  if (!(is.numeric(a) || is.logical(a)) || !(length(a) %in% c(1L, n)) ||
-      !all(a %in% 0:1)) {
-    stop("Treatment must be 0 or 1, with length one or one value per observation.")
-  }
-  rep_len(as.numeric(a), n)
-}
-
-.nf_values <- function(v, n, label) {
-  if (!(is.numeric(v) || is.logical(v)) || length(v) != n || any(!is.finite(v))) {
-    stop(paste(label, "must supply one finite number per observation."))
-  }
-  as.numeric(v)
-}
-
-# Private copies of the earlier helpers make this script self-contained.
-# A vector is one observation. Matrices and data frames have one observation
-# per row, with features in the same order in both inputs.
-.nf_gaussian_kernel <- function(x, y, sigma = 1) {
-  as_rows <- function(z) {
-    if (is.data.frame(z)) z <- as.matrix(z)
-    if (is.null(dim(z))) z <- matrix(z, nrow = 1L)
-    if (!is.matrix(z) || !is.numeric(z)) {
-      stop("Inputs must be numeric vectors, matrices, or data frames.")
-    }
-    storage.mode(z) <- "double"
-    z
-  }
-
-  x <- as_rows(x)
-  y <- as_rows(y)
-  if (ncol(x) != ncol(y)) {
-    stop("x and y must have the same number of features (columns).")
-  }
-  if (!is.numeric(sigma) || length(sigma) != 1L ||
-      !is.finite(sigma) || sigma <= 0) {
-    stop("sigma must be one positive, finite number.")
-  }
-  sigma <- as.numeric(sigma)
-
-  # Accumulate squared distances for every pair of rows, one feature at a time.
-  d2 <- matrix(0, nrow = nrow(x), ncol = nrow(y))
-  for (j in seq_len(ncol(x))) {
-    delta <- outer(x[, j], y[, j], "-") / sigma
-    d2 <- d2 + delta^2
-  }
-  drop(exp(-0.5 * d2))
-}
-
-# A vector is a sample of scalar observations. Each matrix or data-frame row
-# is one observation. Pass vectorized = TRUE to evaluate f on the whole sample.
-.nf_empirical_measure <- function(X) {
-  n <- NROW(X)
-  if (n == 0L) stop("X must contain at least one observation.")
-
-  if (is.matrix(X)) {
-    observation <- function(i) X[i, , drop = TRUE]
-  } else if (is.data.frame(X)) {
-    observation <- function(i) X[i, , drop = FALSE]
-  } else if (is.null(dim(X)) && (is.atomic(X) || is.list(X))) {
-    observation <- function(i) X[[i]]
-  } else {
-    stop("Supply a vector, a list of observations, a matrix, or a data frame.")
-  }
-
-  function(f, vectorized = FALSE) {
-    if (!is.function(f)) stop("f must be a function.")
-    values <- if (vectorized) {
-      f(X)
-    } else {
-      vapply(seq_len(n), function(i) f(observation(i)), numeric(1))
-    }
-    if (length(values) != n || !(is.numeric(values) || is.logical(values))) {
-      stop("f must give one numeric or logical value per observation.")
-    }
-    mean(values)
-  }
-}

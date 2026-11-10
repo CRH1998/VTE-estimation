@@ -3,7 +3,7 @@
 ################################################################################
 #                                                                              #
 #         This script contains functions to perform the U-statistic            #
-#         cross-fitting procedure for the estimation                           #
+#         cross-fitting procedure for estimation                               #
 #                                                                              #
 ################################################################################
 #                                                                              #
@@ -26,7 +26,7 @@ make_pair_folds <- function(n, K = 2L, seed = NULL) {
             n >= 2 * K,
             n == as.integer(n))
   
-  #browser()
+  
   set.seed(seed)
   
   #-----------------------------------------------------------------------------
