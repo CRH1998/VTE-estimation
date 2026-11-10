@@ -70,18 +70,24 @@ source("simulations.R")
 source("u_statistic_crossfit.R")
 source("embedded_u_statistic.R")
 
-test_data <- sim_SB(n = 400, V_tau = 0.05, tau = 0.15, J = 5)
+test_data <- sim_SB(n = 400, V_tau = 0.05, tau = 0.15, J = 4)
+#test_data <- sim_Dukes(800, heterogeneity = "QuantHMC", randomized = T, heterogeneity_degree = 7.5)
+
+#median_gaussian_kernel <- make_median_gaussian_kernel(test_data2[, c("X1", "X2", "X3")])
+
 plan <- make_pair_folds(nrow(test_data), K = 2L, seed = 17L)
 
 #set.seed(18)
 out <- crossfit_embedded_u(
   test_data, 
   plan,
-  splits = 2L, 
-  K = 5L,
+  inner_splits = 2L,
+  K = 2L,
   randomized = TRUE, 
   pi_hat = 0.5,
-  SL.lib = c("SL.glmnet", "SL.randomForest", "SL.xgboost"),
+  SL.lib = c("SL.ranger", "SL.xgboost", "SL.glmnet"),
+  kernel = "median",
+  bandwidth_pairs = 50000L,
   keep_pair_scores = TRUE
 )
 out$estimate

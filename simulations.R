@@ -97,6 +97,7 @@ sim_SB <- function(n, J = 5,
 sim_Dukes <- function(n, heterogeneity = c("None", "QuantHMC", "QuantHNMC"), randomized = FALSE,
                       noise_mean = 0, noise_sd = 3, heterogeneity_degree = 15, pi_01x = 0.5) {
   
+  
   heterogeneity <- match.arg(heterogeneity)
   
   X1 <- runif(n = n, min = -1, max = 1)
@@ -115,6 +116,7 @@ sim_Dukes <- function(n, heterogeneity = c("None", "QuantHMC", "QuantHNMC"), ran
   if(heterogeneity == "None"){ # No heterogeneity
     gamma <- 3/4
   } else if (heterogeneity == "QuantHMC"){ # Quantitative heterogeneity; monotone CATE
+    # VCATE is equal to 13/768 * heterogeneity_degree^2
     gamma <- heterogeneity_degree*(X3 - 0.5) * (X3 > 0.5)
   } else if (heterogeneity == "QuantHNMC"){ # Quantitative heterogeneity; non-monotone CATE
     gamma <- 3*(1 - X3^2)
@@ -128,6 +130,9 @@ sim_Dukes <- function(n, heterogeneity = c("None", "QuantHMC", "QuantHNMC"), ran
 
 
 
+############################################################
+#                 Hines et al. simulations                 #
+############################################################
 
 
 

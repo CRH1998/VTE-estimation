@@ -7,7 +7,7 @@
 #' @param data Data frame with Y, binary A, and numeric covariates.
 #' @param pair_folds The object returned by make_pair_folds() for these data,
 #'   in the same row order.
-#' @param ... Arguments to nuisance_func(), e.g. splits, K, SL.lib, randomized,
+#' @param ... Arguments to nuisance_func(), e.g. inner_splits, K, SL.lib, randomized,
 #'   pi_hat, hal, or kernel. K here controls the learner's internal CV.
 #' @param keep_pair_scores Save the symmetric n-by-n matrix of cross-fitted
 #'   pair scores with zero diagonal for bootstrap_embedded_u(). Default FALSE.
@@ -24,7 +24,7 @@
 #' dat$Y <- with(dat, x2 + A * (1 + x1)) + rnorm(n)
 #' plan <- make_pair_folds(n, K = 2L, seed = 17L)
 #' set.seed(18)
-#' ans <- crossfit_embedded_u(dat, plan, splits = 2L, K = 3L,
+#' ans <- crossfit_embedded_u(dat, plan, inner_splits = 2L, K = 3L,
 #'                           SL.lib = "SL.glm", randomized = TRUE, pi_hat = 0.5,
 #'                           keep_pair_scores = TRUE)
 #' ans$estimate
@@ -117,6 +117,11 @@ crossfit_embedded_u <- function(data, pair_folds, ..., keep_pair_scores = FALSE)
     })
     
     block_sums[l] <- sum(contribution)
+    
+    
+    #---------------------------------------------------------------------------
+    # 3.0 Save the pairwise scores for bootstrap_embedded_u().
+    #---------------------------------------------------------------------------
     if (keep_pair_scores) {
       
       if (identical(b$type, "triangle")) {
@@ -148,13 +153,15 @@ crossfit_embedded_u <- function(data, pair_folds, ..., keep_pair_scores = FALSE)
     result$pair_scores <- H
   }
   
-  result
+  return(result)
   
 }
 
 
+
+
 # For one outer block and one inner fit, return the sum or the individual
-# scores. Triangles store only the strict upper triangle in local row order.
+# kernels Triangles store only the strict upper triangle in local row order.
 .eu_block_sum <- function(s, z, x, b, keep_pair_scores = FALSE) {
   
   # Retrieve the R term from the inner fit.
@@ -163,10 +170,13 @@ crossfit_embedded_u <- function(data, pair_folds, ..., keep_pair_scores = FALSE)
   # Calculate the first-order influence function term
   h <- (s$embedded_cate(x) - s$mean_embedding) * (r + s$centred_cate(x))
   
-  # 
+  # Identify the block type. Triangles have only one side, rectangles have two.
   triangle <- identical(b$type, "triangle")
+  
+  # Make left and right the local row indices for the block. In a triangle, right is empty.
   left <- seq_along(b$left)
   right <- if (triangle) left else length(left) + seq_along(b$right)
+  
   
   # Restore the matrix shape when either side of a rectangle has one row.
   kc <- s$centred_kernel(x[left, , drop = FALSE], x[right, , drop = FALSE])
@@ -178,20 +188,30 @@ crossfit_embedded_u <- function(data, pair_folds, ..., keep_pair_scores = FALSE)
   
   # In a triangle use i < j in the local group order. In a rectangle every
   # left/right combination is one unordered pair, regardless of row labels.
+  # Initialize the sums vector
   sums <- numeric(length(right))
+  
   for (col in seq_along(right)) {
+    
+    # Define the local row indices for the left and right sides of the block.
     i <- if (triangle) seq_len(col - 1L) else left
     j <- right[col]
     
     # Calculate the pairwise kernels
     values <- h[i] + h[j] + r[i] * r[j] * kc[i, col] - s$embedding_norm_sq
+    
     if (any(!is.finite(values))) stop("A pair score is non-finite.")
+    
     if (keep_pair_scores) {
+      # Store pairwise scores for bootstrap_embedded_u(). The kernel is symmetric, so only one triangle is needed.
       # Reuse the kernel column's storage. Unused triangle entries stay zero.
       kc[, col] <- 0
       kc[i, col] <- values
+      
     } else {
+      
       sums[col] <- sum(values)
+      
     }
   }
   if (keep_pair_scores) kc else sum(sums)
@@ -227,8 +247,13 @@ crossfit_embedded_u <- function(data, pair_folds, ..., keep_pair_scores = FALSE)
 bootstrap_embedded_u <- function(object, B = 1999L, alpha = 0.05,
                                  multiplier = c("normal", "rademacher")) {
   
+  
+  # Retrieve the pair scores from the fitted object.
   H <- object$pair_scores
   
+  # ----------------------------------------------------------------------------
+  # 1.0 Verify the inputs
+  # ----------------------------------------------------------------------------
   if (is.null(H)) {
     stop("Refit with crossfit_embedded_u(..., keep_pair_scores = TRUE) to save individual pair scores.")
   }

@@ -88,7 +88,7 @@ source("kernels.R")
 #'
 #' @param train_data Data frame with numeric Y, binary A (0/1), and finite
 #'   numeric covariates. All columns except Y and A are treated as covariates.
-#' @param splits Number of marginal folds, at least two.
+#' @param inner_splits Number of marginal folds, at least two.
 #' @param SL.lib SuperLearner library for the outcome and the unknown propensity.
 #' @param family gaussian() for a continuous Y or binomial() for binary Y.
 #' @param hal Use hal9001 for the outcome regression. An unknown propensity
@@ -98,6 +98,9 @@ source("kernels.R")
 #' @param K Number of internal CV folds for SuperLearner and, if used, HAL.
 #' @param kernel Function k(U, x) returning one numeric value per row of U
 #'   when x is a one-row data frame. The default is Gaussian with median heuristic bandwidth.
+#' @param bandwidth_pairs Maximum number of pairs to use for estimating the Gaussian bandwidth when kernel = "median". 
+#'  If Inf, all pairs are used. If fewer than choose(n, 2) pairs are requested, they are sampled uniformly with replacement. 
+#'  Use set.seed() before this call for a reproducible approximation.
 #' @param fold_id Optional integer labels from 1 to splits, one per training
 #'   row. The default is a balanced random partition independent of the data.
 #' @param SL.env Optional environment for custom SuperLearner wrappers.
@@ -122,7 +125,8 @@ source("kernels.R")
 #' fit$folds[[1]]$cate(x)
 #' fit$average(function(s) s$embedded_cate(x))
 #' }
-nuisance_func <- function(train_data, splits = 2L,
+nuisance_func <- function(train_data, 
+                          inner_splits = 2L,
                           SL.lib = c("SL.glmnet", "SL.randomForest", "SL.xgboost"),
                           family = stats::gaussian(), 
                           hal = FALSE,
@@ -131,6 +135,7 @@ nuisance_func <- function(train_data, splits = 2L,
                           K = 5L,
                           kernel = .nf_gaussian_kernel, 
                           fold_id = NULL,
+                          bandwidth_pairs = Inf,
                           SL.env = NULL) {
   
   #-----------------------------------------------------------------------------
@@ -184,22 +189,26 @@ nuisance_func <- function(train_data, splits = 2L,
     stop("The known treatment probability must be strictly between 0 and 1.")
   }
   
+  # Validate kernel
+  if (!is.function(kernel) && !identical(kernel, "median")) {
+    stop('Supply a kernel function or kernel = "median".')
+  }
+  
   # Validate splits and K
-  if (!is.function(kernel)) stop("kernel must be a function.")
-  .nf_count(splits, 2L, n, "splits")
+  .nf_count(inner_splits, 2L, n, "inner_splits")
   .nf_count(K, if (hal) 3L else 2L, n, "K")
 
   # Validate fold_id
   if (is.null(fold_id)) {
-    fold_id <- sample(rep_len(seq_len(splits), n))
+    fold_id <- sample(rep_len(seq_len(inner_splits), n))
   } else if (!is.numeric(fold_id) || !is.null(dim(fold_id)) ||
-             length(fold_id) != n || !all(fold_id %in% seq_len(splits)) ||
-             !all(seq_len(splits) %in% fold_id)) {
-    stop("fold_id must assign every row once and use every label from 1 to splits.")
+             length(fold_id) != n || !all(fold_id %in% seq_len(inner_splits)) ||
+             !all(seq_len(inner_splits) %in% fold_id)) {
+    stop("fold_id must assign every row once and use every label from 1 to inner_splits.")
   }
   
   # Validate that each regression sample has at least K observations in each treatment arm.
-  sizes <- tabulate(as.integer(fold_id), nbins = splits)
+  sizes <- tabulate(as.integer(fold_id), nbins = inner_splits)
   if (any(n - sizes < K)) stop("K exceeds the size of a regression sample.")
 
   # Validate packages, SL.lib and SL.env
@@ -218,7 +227,7 @@ nuisance_func <- function(train_data, splits = 2L,
   #-----------------------------------------------------------------------------
   # 2.0 Fit nuisance functions in each split
   #-----------------------------------------------------------------------------
-  folds <- lapply(seq_len(splits), function(l) {
+  folds <- lapply(seq_len(inner_splits), function(l) {
     
     r <- which(fold_id != l)      # Regression sample rows
     m <- which(fold_id == l)      # Marginal sample rows
@@ -229,10 +238,19 @@ nuisance_func <- function(train_data, splits = 2L,
     
     # Fit the nuisance functions for the current split using the regression and marginal samples.
     s <- .nf_fit_split(
-      X_reg = X[r, , drop = FALSE], A_reg = A[r], Y_reg = Y[r],
-      U = X[m, , drop = FALSE], kernel = kernel, family = family,
-      hal = hal, randomized = randomized, pi_hat = pi_hat, K = K,
-      SL.lib = SL.lib, SL.env = SL.env
+      X_reg = X[r, , drop = FALSE], 
+      A_reg = A[r], 
+      Y_reg = Y[r],
+      U = X[m, , drop = FALSE], 
+      kernel = kernel,
+      bandwidth_pairs = bandwidth_pairs,
+      family = family,
+      hal = hal, 
+      randomized = randomized, 
+      pi_hat = pi_hat, 
+      K = K,
+      SL.lib = SL.lib, 
+      SL.env = SL.env
     )
     
     s$regression_rows <- r
@@ -287,6 +305,7 @@ nuisance_func <- function(train_data, splits = 2L,
 #' @param U covariates for the marginal empirical measure, one row per observation
 #' @param kernel specifies the kernel function k(U, x) for the embedding. 
 #' It must return one numeric value per row of U when x is a one-row data frame.
+#' @param bandwidth_pairs Maximum number of pairs to use for estimating the Gaussian bandwidth when kernel = "median". If Inf, all pairs are used. If fewer than choose(n, 2) pairs are requested, they are sampled uniformly with replacement. Use set.seed() before this call for a reproducible approximation.
 #' @param family Family object for the outcome regression, either gaussian() or binomial().
 #' @param hal Boolean indicating whether to use hal9001 for the outcome regression. If FALSE, SuperLearner is used.
 #' @param randomized Boolean indicating whether the treatment is randomized. If TRUE, the known treatment probability pi_hat is used; if FALSE, a treatment model is fitted using SuperLearner.
@@ -309,8 +328,20 @@ nuisance_func <- function(train_data, splits = 2L,
 #' @export
 #'
 #' @examples
-.nf_fit_split <- function(X_reg, A_reg, Y_reg, U, kernel, family, hal,
-                          randomized, pi_hat, K, SL.lib, SL.env) {
+.nf_fit_split <- function(X_reg, A_reg, Y_reg, U, 
+                          kernel, family, bandwidth_pairs = Inf, 
+                          randomized, pi_hat, 
+                          hal,
+                          K, SL.lib, SL.env) {
+  
+  
+  #-----------------------------------------------------------------------------
+  # 0.0 Prepare kernel and bandwidth
+  #-----------------------------------------------------------------------------
+  if (identical(kernel, "median")) {
+    kernel <- make_median_gaussian_kernel(X_reg, max_pairs = bandwidth_pairs)
+  }
+  sigma <- if (identical(kernel, .nf_gaussian_kernel)) 1 else attr(kernel, "sigma", exact = TRUE)
   
   
   #-----------------------------------------------------------------------------
