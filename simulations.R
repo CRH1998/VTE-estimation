@@ -168,7 +168,7 @@ sim_Hines <- function(n, sigma = sqrt(0.5)) {
 ############################################################
 # DGP from Morzywołek et al. (2026)
 
-sim_PM = function(n, sigma, beta, alternative_type, sim_scenario){
+sim_PM = function(n, sigma, beta, alternative_type, sim_scenario, randomized = FALSE, pi_hat = 0.5){
   
   # Define the function to for the rough alternative 
   g = function(X){return(sin(5*pi*X))}
@@ -183,7 +183,12 @@ sim_PM = function(n, sigma, beta, alternative_type, sim_scenario){
     names(X) <- c("X1","X2","X3")
     
     # Treatment variable
-    A <- rbinom(n, size=1, exp(-0.4*X$X1+0.1*X$X1*X$X2)/(1+exp(-0.4*X$X1+0.1*X$X1*X$X2)))
+    if (randomized){
+      A <- rbinom(n, size=1, pi_hat)
+    } else {
+      A <- rbinom(n, size=1, exp(-0.4*X$X1+0.1*X$X1*X$X2)/(1+exp(-0.4*X$X1+0.1*X$X1*X$X2)))
+    }
+    
     
     # Conditional Average Treatment Effect (CATE) function
     if(alternative_type=="smooth"){
@@ -210,7 +215,11 @@ sim_PM = function(n, sigma, beta, alternative_type, sim_scenario){
     names(X) <- c("X1","X2","X3","X4","X5")
     
     # Treatment variable
-    A <- rbinom(n, size=1, exp(-0.4*X$X1+0.1*X$X1*X$X2)/(1+exp(-0.4*X$X1+0.1*X$X1*X$X2)))
+    if (randomized){
+      A <- rbinom(n, size=1, pi_hat)
+    } else {
+      A <- rbinom(n, size=1, exp(-0.4*X$X1+0.1*X$X1*X$X2)/(1+exp(-0.4*X$X1+0.1*X$X1*X$X2)))
+    }
     
     # CATE function
     if(alternative_type=="smooth"){
@@ -237,7 +246,11 @@ sim_PM = function(n, sigma, beta, alternative_type, sim_scenario){
     names(X) <- c("X1","X2","X3","X4","X5","X6","X7","X8","X9","X10")
     
     # Treatment variable
-    A <- rbinom(n, size=1, exp(-0.4*X$X1+0.1*X$X1*X$X2)/(1+exp(-0.4*X$X1+0.1*X$X1*X$X2)))
+    if (randomized){
+      A <- rbinom(n, size=1, pi_hat)
+    } else {
+      A <- rbinom(n, size=1, exp(-0.4*X$X1+0.1*X$X1*X$X2)/(1+exp(-0.4*X$X1+0.1*X$X1*X$X2)))
+    }
     
     # Form of CATE function
     if(alternative_type=="smooth"){
@@ -264,7 +277,12 @@ sim_PM = function(n, sigma, beta, alternative_type, sim_scenario){
     names(X) <- c("X1","X2","X3","X4","X5","X6","X7","X8","X9","X10","X11","X12","X13","X14","X15","X16","X17","X18","X19","X20")
     
     # Treatment variable
-    A <- rbinom(n, size=1, exp(-0.4*X$X1+0.1*X$X1*X$X2)/(1+exp(-0.4*X$X1+0.1*X$X1*X$X2)))
+    
+    if (randomized){
+      A <- rbinom(n, size=1, pi_hat)
+    } else {
+      A <- rbinom(n, size=1, exp(-0.4*X$X1+0.1*X$X1*X$X2)/(1+exp(-0.4*X$X1+0.1*X$X1*X$X2)))
+    }
     
     # CATE function
     if(alternative_type=="smooth"){
@@ -280,6 +298,8 @@ sim_PM = function(n, sigma, beta, alternative_type, sim_scenario){
     
   }
   
-  return(list(X=X,A=A,Y=Y, tau=tau))
-  
+  return(data.frame(Y = Y, A = A, X))
 }
+
+
+
