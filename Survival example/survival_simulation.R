@@ -74,7 +74,7 @@ population_survival <- function(u, beta = 0, p = 0.5, rate = 1) {
 #-------------------------------------------------------------------------------
 
 simulate_nonproportional_survival <- function(n, 
-                                              beta = 0,
+                                              beta = -1,
                                               time_effect = 0.5,
                                               p = 0.5, 
                                               scale = 1,
@@ -90,9 +90,9 @@ simulate_nonproportional_survival <- function(n,
     A = rbinom(n, 1, p)
   )
   
-  # 2. Simulate survival times with a time-dependent effect of 'trt'
-  # Suppose the log hazard ratio starts negative (protective effect) 
-  # but changes linearly with time (non-proportional hazard).
+  # 2. Simulate survival times with a time-dependent effect of 'A'
+  # Suppose the log hazard ratio starts negative (protective effect - negative beta) 
+  # but changes linearly with time (non-proportional hazard - positive time_effect).
   sim_data <- simsurv(
     dist = "weibull",
     lambdas = scale,

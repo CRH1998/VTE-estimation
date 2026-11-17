@@ -17,6 +17,7 @@ source("survival_simulation.R")
 source("survival_estimation.R")
 source("u_statistic_crossfit.R")
 source("survival_multiplier_bootstrap.R")
+source("survival_plots.R")
 
 ################################################################################
 #                              Load required libraries                         #
@@ -26,6 +27,7 @@ library(survival)
 library(survminer)
 library(Rcpp)
 library(ggplot2)
+library(patchwork)
 
 ################################################################################
 
@@ -118,9 +120,9 @@ run_one_standard <- function(n, beta, p, rate, tau, K = 2L, n_boot = 1999L, alph
 seed <- 16112026    # Random seed for reproducibility
 p <- 0.5            # Probability of treatment assignment
 rate <- 1           # Baseline hazard rate
-tau <- 1            # Upper time limit
+tau <- 2            # Upper time limit
 n_values <- c(400, 800, 1200, 1600, 2000, 3000) # Sample sizes to test
-beta_values <- c(0, 0.1823216, 0.2623643, 0.4054651) # Corresponding to HR = 1, 1.1, 1.2, 1.3, 1.5
+beta_values <- c(0, 0.09531018, 0.1823216, 0.2623643, 0.4054651) # Corresponding to HR = 1, 1.1, 1.2, 1.3, 1.5
 
 n_rep <- 100L        # Number of replicates per setting
 
@@ -195,81 +197,48 @@ colnames(results_df) <- c("n",
 
 
 # Summarize results
-summary_results <- results_df %>% 
-  group_by(n, beta) %>%                               
-  summarise(LogRankLevel = mean(log_rank_p_value > 0.05 & beta == 0),
-            TwoStepLevel = mean(mult_test_p_value > 0.05 & beta == 0),
-            LogRankPower = mean(log_rank_p_value < 0.05 & beta > 0),
-            TwoStepPower = mean(mult_test_p_value < 0.05 & beta > 0),
-            oracle_val = mean(oracle_val),
-            est = mean(estimate),
-            var = var(estimate),
-            RMSE = mean(RMSE),
-            .groups = "drop") %>%
+summary_results <- results_df %>%
+  group_by(n, beta) %>%
+  summarise(
+    LogRankLevel = if (first(beta) == 0) {
+      mean(log_rank_p_value <= alpha)
+    } else NA_real_,
+    TwoStepLevel = if (first(beta) == 0) {
+      mean(mult_test_p_value <= alpha)
+    } else NA_real_,
+    LogRankPower = if (first(beta) > 0) {
+      mean(log_rank_p_value <= alpha)
+    } else NA_real_,
+    TwoStepPower = if (first(beta) > 0) {
+      mean(mult_test_p_value <= alpha)
+    } else NA_real_,
+    RMSE = sqrt(mean((estimate - oracle_val)^2)),
+    oracle_val = mean(oracle_val),
+    est = mean(estimate),
+    var = var(estimate),
+    .groups = "drop"
+  ) %>%
   arrange(n, beta)
 
 
+p_levels <- ggplot_empirical_levels(summary_results, alpha = 0.05)
+p_power <- ggplot_empirical_power(summary_results)
+p_rmse <- ggplot_empirical_RMSE(summary_results)
+p_combined <- combine_article_plots(p_levels, p_power, p_rmse)
+
+# print(p_levels)
+# print(p_power)
+# print(p_rmse)
+# print(p_combined)
 
 
-# Plot empirical levels with n on the x-axis and empirical level on the y-axis, with separate lines for each test (log-rank and multiplier) represented by different line types and different values of beta represented by different colors. Use ggplot2 for visualization.
-ggplot_empirical_levels <- function(summary_results) {
-  summary_results_long <- summary_results %>%
-    filter(beta == 0) %>%
-    pivot_longer(cols = c(LogRankLevel, TwoStepLevel), 
-                 names_to = "test", 
-                 values_to = "empirical_level")
-  
-  ggplot(summary_results_long, aes(x = n, y = empirical_level, color = factor(beta), linetype = test)) +
-    geom_line() +
-    geom_point() +
-    geom_hline(yintercept = 0.95, linetype = "dashed", color = "red") +
-    labs(title = "Empirical Levels of Tests by Sample Size and Beta",
-         x = "Sample Size (n)",
-         y = "Empirical Level",
-         color = "Beta",
-         linetype = "Test") +
-    theme_minimal()
-}
-
-ggplot_empirical_levels(summary_results)
-
-
-
-# Plot empirical power with n on the x-axis and empirical power on the y-axis, with separate lines for each test (log-rank and multiplier) represented by different line types and different values of beta represented by different colors. Use ggplot2 for visualization.
-ggplot_empirical_power <- function(summary_results) {
-  summary_results_long <- summary_results %>%
-    filter(beta > 0) %>%
-    pivot_longer(cols = c(LogRankPower, TwoStepPower), 
-                 names_to = "test", 
-                 values_to = "empirical_power")
-  
-  ggplot(summary_results_long, aes(x = n, y = empirical_power, color = factor(beta), linetype = test)) +
-    geom_line() +
-    geom_point() +
-    labs(title = "Empirical Power of Tests by Sample Size and Beta",
-         x = "Sample Size (n)",
-         y = "Empirical Power",
-         color = "Beta",
-         linetype = "Test") +
-    theme_minimal()
-}
-
-ggplot_empirical_power(summary_results)
-
-
-
-# Plot empirical RMSE with n on the x-axis and empirical RMSE on the y-axis, with different values of beta represented by different colors. Use ggplot2 for visualization.
-ggplot_empirical_RMSE <- function(summary_results) {
-  ggplot(summary_results, aes(x = n, y = RMSE, color = factor(beta))) +
-    geom_line() +
-    geom_point() +
-    labs(title = "Empirical RMSE of reduced two-step estimator by Sample Size and Beta",
-         x = "Sample Size (n)",
-         y = "Empirical RMSE",
-         color = "Beta") +
-    theme_minimal()
-}
-ggplot_empirical_RMSE(summary_results)
+ggsave(
+  "survival_simulation_combined.pdf",
+  plot = p_combined,
+  width = 200, height = 100, units = "mm",
+  device = grDevices::pdf,
+  useDingbats = FALSE, bg = "white"
+)
 
 
 
@@ -327,7 +296,7 @@ scale <- 1          # Scale parameter for Weibull distribution - scale = 1 corre
 tau <- 3            # Upper time limit
 n_values <- c(400, 800, 1200, 1600, 2000)                        # Sample sizes to test
 beta_values <- c(0, 0.4054651)                                   # Baseline log hazard ratios corresponding to HR = 1, 1.5
-time_effect_values <- c(0, -0.2623643, -0.4054651, -0.6931472)   # Time-dependent effect values
+time_effect_values <- c(0, -0.4054651, -0.6931472, -1.098612)   # Time-dependent effect values
 
 n_rep_nonprop <- 3L        # Number of replicates per setting
 
@@ -392,13 +361,12 @@ names(results_nonprop) <- with(
 
 # Process results
 results_df_nonprop <- lapply(results_nonprop, function(sim_result) {
-  matrix(unlist(sim_result), ncol = 6, byrow = T)
+  matrix(unlist(sim_result), ncol = 5, byrow = T)
 })
 results_df_nonprop <- data.frame(do.call(rbind, results_df_nonprop))
 colnames(results_df_nonprop) <- c("n", 
                           "beta", 
                           "time_effect",
-                          "estimate",
                           "mult_test_p_value", 
                           "log_rank_p_value")
 
