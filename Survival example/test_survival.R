@@ -67,7 +67,7 @@ mult_test$p_value
 
 
 ################################################################################
-# 1. Simulation study
+# 1. Simulation study with proportional hazards
 ################################################################################
 
 #-------------------------------------------------------------------------------
@@ -90,7 +90,12 @@ run_one_standard <- function(n, beta, p, rate, tau, K = 2L, n_boot = 1999L, alph
   mult_test_p_value <- mult_test$p_value
   
   # Estimate survival function and log-rank test with no censoring and no covariates
-  surv_obj <- survival::Surv(time = surv_data$time, event = rep(1, n))
+  
+  # Truncate the survival times at the upper limit
+  time_tau  <- pmin(surv_data$time, tau)
+  event_tau <- as.numeric(surv_data$time <= tau)
+  
+  surv_obj <- survival::Surv(time = time_tau, event = event_tau)
   surv_fit <- survival::survfit(surv_obj ~ surv_data$A)
   log_rank_test <- survival::survdiff(surv_obj ~ surv_data$A)
   log_rank_p_value <- log_rank_test$pvalue
@@ -114,10 +119,10 @@ seed <- 16112026    # Random seed for reproducibility
 p <- 0.5            # Probability of treatment assignment
 rate <- 1           # Baseline hazard rate
 tau <- 1            # Upper time limit
-n_values <- c(400, 800, 1200, 1600, 2000) # Sample sizes to test
-beta_values <- c(0, 0.09531018, 0.1823216, 0.2623643, 0.4054651) # Corresponding to HR = 1, 1.1, 1.2, 1.3, 1.5
+n_values <- c(400, 800, 1200, 1600, 2000, 3000) # Sample sizes to test
+beta_values <- c(0, 0.1823216, 0.2623643, 0.4054651) # Corresponding to HR = 1, 1.1, 1.2, 1.3, 1.5
 
-n_rep <- 250L        # Number of replicates per setting
+n_rep <- 100L        # Number of replicates per setting
 
 settings <- expand.grid(
   n = n_values,
@@ -265,3 +270,150 @@ ggplot_empirical_RMSE <- function(summary_results) {
     theme_minimal()
 }
 ggplot_empirical_RMSE(summary_results)
+
+
+
+
+
+################################################################################
+# 2. Simulation study with non-proportional hazards
+################################################################################
+
+# Repeat the above simulation study but with simulate_nonproportional_survival instead of simulate_survival, and adjust the run_one_standard function accordingly.
+
+#-------------------------------------------------------------------------------
+# 2.1 Define function to run one simulation with non-proportional hazards
+#-------------------------------------------------------------------------------
+run_one_nonproportional <- function(n, beta, time_effect, p, scale, shape, tau, K = 2L, n_boot = 1999L, alpha = 0.05) {
+  
+  # Simulate non-proportional hazards survival data
+  surv_data <- simulate_nonproportional_survival(n = n, beta = beta, time_effect = time_effect,
+                                                 p = p, scale = scale, shape = shape)
+  
+  
+  # Estimate the cross-fit survival function and calculate the multiplier test
+  cf_surv <- crossfit_survival(data = surv_data, tau = tau, K = K, fit_nuisance = fit_nuisance)
+  mult_test <- multiplier_test(object = cf_surv, 
+                               n_boot = n_boot, 
+                               alpha = alpha,
+                               distribution = "normal")
+  mult_test_p_value <- mult_test$p_value
+  
+  # Estimate survival function and log-rank test with no censoring and no covariates
+  time_tau  <- pmin(surv_data$time, tau)
+  event_tau <- as.numeric(surv_data$time <= tau)
+  
+  surv_obj <- survival::Surv(time = time_tau, event = event_tau)
+  surv_fit <- survival::survfit(surv_obj ~ surv_data$A)
+  log_rank_test <- survival::survdiff(surv_obj ~ surv_data$A)
+  log_rank_p_value <- log_rank_test$pvalue
+  
+  
+  list(n = n, 
+       beta = beta,
+       time_effect = time_effect,
+       mult_test_p_value = mult_test$p_value,
+       log_rank_p_value = log_rank_p_value)
+}
+
+#-------------------------------------------------------------------------------
+# 2.2 Simulation study settings for non-proportional hazards
+#-------------------------------------------------------------------------------
+
+seed <- 16112026    # Random seed for reproducibility
+p <- 0.5            # Probability of treatment assignment
+shape <- 1          # Shape parameter for Weibull distribution - shape = 1 corresponds to exponential distribution
+scale <- 1          # Scale parameter for Weibull distribution - scale = 1 corresponds to rate = 1 for exponential distribution
+tau <- 3            # Upper time limit
+n_values <- c(400, 800, 1200, 1600, 2000)                        # Sample sizes to test
+beta_values <- c(0, 0.4054651)                                   # Baseline log hazard ratios corresponding to HR = 1, 1.5
+time_effect_values <- c(0, -0.2623643, -0.4054651, -0.6931472)   # Time-dependent effect values
+
+n_rep_nonprop <- 3L        # Number of replicates per setting
+
+settings_nonprop <- expand.grid(
+  n = n_values,
+  beta = beta_values,
+  time_effect = time_effect_values,
+  KEEP.OUT.ATTRS = FALSE,
+  stringsAsFactors = FALSE
+)
+
+# Each setting gets n_rep consecutive runs
+setting_index_nonprop <- rep(seq_len(nrow(settings_nonprop)), each = n_rep_nonprop)
+                             
+#------------------------------------------------------------------------------
+# 2.3 Run the simulation study for non-proportional hazards
+#------------------------------------------------------------------------------
+start.time <- Sys.time()
+old_plan_nonprop <- future::plan(future::multisession, workers = 4L)
+
+runs_nonprop <- tryCatch(
+  future.apply::future_lapply(
+    seq_along(setting_index_nonprop),
+    function(sim_id) {
+      setting <- settings_nonprop[setting_index_nonprop[sim_id], , drop = FALSE]
+      run_one_nonproportional(
+        n = setting$n,                           # Number of individuals
+        beta = setting$beta,                     # Log hazard ratio
+        time_effect = setting$time_effect,       # Time-dependent effect
+        p = p,                                   # Probability of treatment assignment
+        scale = scale,                           # Scale parameter for Weibull distribution
+        shape = shape,                           # Shape parameter for Weibull distribution
+        tau = tau                                # Upper time limit
+      )
+    },
+    future.chunk.size = 1L,
+    future.seed = seed
+  ),
+  finally = future::plan(old_plan)
+)
+end.time <- Sys.time()
+end.time - start.time
+
+#-------------------------------------------------------------------------------
+# 1.4 Process the results
+#-------------------------------------------------------------------------------  
+# One list element per setting, with replicates in columns
+results_nonprop <- lapply(seq_len(nrow(settings_nonprop)), function(j) {
+  simplify2array(runs_nonprop[setting_index_nonprop == j], higher = FALSE)
+})
+
+# Label each element with its parameter combination
+names(results_nonprop) <- with(
+  settings_nonprop,
+  paste0(
+    "n=", n,
+    "_beta=", beta,
+    "_time_effect=", time_effect
+  )
+)
+
+
+# Process results
+results_df_nonprop <- lapply(results_nonprop, function(sim_result) {
+  matrix(unlist(sim_result), ncol = 6, byrow = T)
+})
+results_df_nonprop <- data.frame(do.call(rbind, results_df_nonprop))
+colnames(results_df_nonprop) <- c("n", 
+                          "beta", 
+                          "time_effect",
+                          "estimate",
+                          "mult_test_p_value", 
+                          "log_rank_p_value")
+
+
+
+# Summarize results
+summary_results_nonprop <- results_df_nonprop %>% 
+  group_by(n, beta, time_effect) %>%                               
+  summarise(LogRankLevel = mean(log_rank_p_value > 0.05 & beta == 0),
+            TwoStepLevel = mean(mult_test_p_value > 0.05 & beta == 0),
+            LogRankPower = mean(log_rank_p_value < 0.05 & beta != 0),
+            TwoStepPower = mean(mult_test_p_value < 0.05 & beta != 0),
+            .groups = "drop") %>%
+  arrange(n, beta, time_effect)
+
+
+
+

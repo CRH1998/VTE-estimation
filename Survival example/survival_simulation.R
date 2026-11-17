@@ -11,8 +11,10 @@
 #             No scripts are need for this script                              #
 ################################################################################
 
+library(simsurv)
+
 #-------------------------------------------------------------------------------
-# 1. Simulate survival data
+# 1. Simulate proportional hazards survival data
 #-------------------------------------------------------------------------------
 
 #' Title
@@ -44,7 +46,7 @@ simulate_survival <- function(n, beta = 0, p = 0.5, rate = 1, seed = NULL) {
 
 
 #-------------------------------------------------------------------------------
-# 2. Population survival function
+# 2. Population survival function for proportional hazards model
 #-------------------------------------------------------------------------------
 
 #' Title
@@ -65,6 +67,76 @@ population_survival <- function(u, beta = 0, p = 0.5, rate = 1) {
 
 #-------------------------------------------------------------------------------
 
+
+
+#-------------------------------------------------------------------------------
+# 3. Simulate non-proportional hazards survival data
+#-------------------------------------------------------------------------------
+
+simulate_nonproportional_survival <- function(n, 
+                                              beta = 0,
+                                              time_effect = 0.5,
+                                              p = 0.5, 
+                                              scale = 1,
+                                              shape = 1.5,
+                                              seed = NULL) {
+  #browser()
+  set.seed(seed)
+  
+  
+  # 1. Define a dataset with a binary treatment covariate
+  covs <- data.frame(
+    id = seq_len(n),
+    A = rbinom(n, 1, p)
+  )
+  
+  # 2. Simulate survival times with a time-dependent effect of 'trt'
+  # Suppose the log hazard ratio starts negative (protective effect) 
+  # but changes linearly with time (non-proportional hazard).
+  sim_data <- simsurv(
+    dist = "weibull",
+    lambdas = scale,
+    gammas = shape,
+    x = covs,
+    betas = c(A = beta),                         # base log HR
+    tde = c(A = time_effect),       # time-dependent interaction
+    maxt = 5
+  )
+  
+  # Merge survival times back with covariates
+  data <- merge(covs, sim_data, by = "id")
+  data$id <- NULL      # Remove the id column for clarity
+  data$status <- NULL  # Remove the status column since no censoring is simulated here
+  names(data)[names(data) == "eventtime"] <- "time"
+  return(data)
+}
+#-------------------------------------------------------------------------------
+
+
+beta_values <- c(0, 0.1823216, 0.2623643, 0.4054651)   # Baseline log hazard ratios corresponding to HR = 1, 1.2, 1.3, 1.5
+time_effect_values <- c(0, -0.1823216, -0.2623643, -0.4054651)               # Time-dependent effect values to test
+
+test_data <- simulate_nonproportional_survival(n = 400, 
+                                               beta = 0.4054651, 
+                                               time_effect = -0.1823216, 
+                                               p = 0.5, 
+                                               scale = 1, 
+                                               shape = 1, 
+                                               seed = NULL)
+
+km_fit <- survfit(Surv(time, rep(1, nrow(test_data))) ~ A, data = test_data)
+
+# Option 1: Publication-ready plot with risk table using survminer
+ggsurvplot(
+  km_fit,
+  data = test_data,
+  pval = TRUE,
+  conf.int = TRUE,
+  risk.table = TRUE,
+  legend.labs = c("Control (A = 0)", "Treatment (A = 1)"),
+  xlab = "Time",
+  ylab = "Survival Probability"
+)
 
 
 
