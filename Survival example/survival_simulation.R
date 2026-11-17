@@ -73,42 +73,35 @@ population_survival <- function(u, beta = 0, p = 0.5, rate = 1) {
 # 3. Simulate non-proportional hazards survival data
 #-------------------------------------------------------------------------------
 
-simulate_nonproportional_survival <- function(n, 
-                                              beta = -1,
-                                              time_effect = 0.5,
-                                              p = 0.5, 
-                                              scale = 1,
-                                              shape = 1.5,
-                                              seed = NULL) {
-  #browser()
-  set.seed(seed)
+simulate_nonproportional_survival <- function(
+    n, beta = 1, delta = -0.5, p = 0.5, rate = 1, seed = NULL) {
   
-  
-  # 1. Define a dataset with a binary treatment covariate
-  covs <- data.frame(
-    id = seq_len(n),
-    A = rbinom(n, 1, p)
+  stopifnot(
+    length(n) == 1L, is.finite(n), n >= 0, n == floor(n),
+    length(beta) == 1L, is.finite(beta),
+    length(delta) == 1L, is.finite(delta),
+    length(p) == 1L, is.finite(p), p >= 0, p <= 1,
+    length(rate) == 1L, is.finite(rate), rate > 0
   )
   
-  # 2. Simulate survival times with a time-dependent effect of 'A'
-  # Suppose the log hazard ratio starts negative (protective effect - negative beta) 
-  # but changes linearly with time (non-proportional hazard - positive time_effect).
-  sim_data <- simsurv(
-    dist = "weibull",
-    lambdas = scale,
-    gammas = shape,
-    x = covs,
-    betas = c(A = beta),                         # base log HR
-    tde = c(A = time_effect),       # time-dependent interaction
-    maxt = 5
-  )
+  if (!is.null(seed)) set.seed(seed)
   
-  # Merge survival times back with covariates
-  data <- merge(covs, sim_data, by = "id")
-  data$id <- NULL      # Remove the id column for clarity
-  data$status <- NULL  # Remove the status column since no censoring is simulated here
-  names(data)[names(data) == "eventtime"] <- "time"
-  return(data)
+  A <- rbinom(n, size = 1, prob = p)
+  
+  # Exponential times under time-independent treatment effects
+  time <- rexp(n, rate = rate * exp(beta * A))
+  
+  # Transform treated individuals' times to incorporate delta
+  if (delta != 0) {
+    treated <- which(A == 1)
+    x <- delta * time[treated]
+    
+    time[treated] <- Inf
+    finite_event <- x > -1
+    time[treated[finite_event]] <- log1p(x[finite_event]) / delta
+  }
+  
+  data.frame(A = A, time = time)
 }
 #-------------------------------------------------------------------------------
 
@@ -117,11 +110,10 @@ beta_values <- c(0, 0.1823216, 0.2623643, 0.4054651)   # Baseline log hazard rat
 time_effect_values <- c(0, -0.1823216, -0.2623643, -0.4054651)               # Time-dependent effect values to test
 
 test_data <- simulate_nonproportional_survival(n = 400, 
-                                               beta = 0.4054651, 
-                                               time_effect = -0.1823216, 
+                                               beta = 1, 
+                                               delta = -0.75, 
                                                p = 0.5, 
-                                               scale = 1, 
-                                               shape = 1, 
+                                               rate = 1, 
                                                seed = NULL)
 
 km_fit <- survfit(Surv(time, rep(1, nrow(test_data))) ~ A, data = test_data)

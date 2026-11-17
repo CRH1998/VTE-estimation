@@ -253,11 +253,14 @@ ggsave(
 #-------------------------------------------------------------------------------
 # 2.1 Define function to run one simulation with non-proportional hazards
 #-------------------------------------------------------------------------------
-run_one_nonproportional <- function(n, beta, time_effect, p, scale, shape, tau, K = 2L, n_boot = 1999L, alpha = 0.05) {
+run_one_nonproportional <- function(n, beta, delta, p, rate, tau, K = 2L, n_boot = 1999L, alpha = 0.05) {
   
   # Simulate non-proportional hazards survival data
-  surv_data <- simulate_nonproportional_survival(n = n, beta = beta, time_effect = time_effect,
-                                                 p = p, scale = scale, shape = shape)
+  surv_data <- simulate_nonproportional_survival(n = n, 
+                                                 beta = beta, 
+                                                 delta = delta,
+                                                 p = p, 
+                                                 rate = rate)
   
   
   # Estimate the cross-fit survival function and calculate the multiplier test
@@ -280,7 +283,7 @@ run_one_nonproportional <- function(n, beta, time_effect, p, scale, shape, tau, 
   
   list(n = n, 
        beta = beta,
-       time_effect = time_effect,
+       delta = delta,
        mult_test_p_value = mult_test$p_value,
        log_rank_p_value = log_rank_p_value)
 }
@@ -291,19 +294,19 @@ run_one_nonproportional <- function(n, beta, time_effect, p, scale, shape, tau, 
 
 seed <- 16112026    # Random seed for reproducibility
 p <- 0.5            # Probability of treatment assignment
-shape <- 1          # Shape parameter for Weibull distribution - shape = 1 corresponds to exponential distribution
-scale <- 1          # Scale parameter for Weibull distribution - scale = 1 corresponds to rate = 1 for exponential distribution
-tau <- 3            # Upper time limit
-n_values <- c(400, 800, 1200, 1600, 2000)                        # Sample sizes to test
+rate <- 1           # Rate parameter
+tau <- 2            # Upper time limit
+n_values <- c(400, 800, 1200, 1600, 2400)                        # Sample sizes to test
 beta_values <- c(0, 0.4054651)                                   # Baseline log hazard ratios corresponding to HR = 1, 1.5
-time_effect_values <- c(0, -0.4054651, -0.6931472, -1.098612)   # Time-dependent effect values
+delta_values <- c(0, -0.4054651, -0.6931472, -1.098612)          # Time-dependent effect values
+alpha_nonprop <- 0.05
 
-n_rep_nonprop <- 3L        # Number of replicates per setting
+n_rep_nonprop <- 20L                                              # Number of replicates per setting
 
 settings_nonprop <- expand.grid(
   n = n_values,
   beta = beta_values,
-  time_effect = time_effect_values,
+  delta = delta_values,
   KEEP.OUT.ATTRS = FALSE,
   stringsAsFactors = FALSE
 )
@@ -325,17 +328,16 @@ runs_nonprop <- tryCatch(
       run_one_nonproportional(
         n = setting$n,                           # Number of individuals
         beta = setting$beta,                     # Log hazard ratio
-        time_effect = setting$time_effect,       # Time-dependent effect
+        delta = setting$delta,                   # Time-dependent effect
         p = p,                                   # Probability of treatment assignment
-        scale = scale,                           # Scale parameter for Weibull distribution
-        shape = shape,                           # Shape parameter for Weibull distribution
+        rate = rate,                             # Rate parameter for exponential distribution
         tau = tau                                # Upper time limit
       )
     },
     future.chunk.size = 1L,
     future.seed = seed
   ),
-  finally = future::plan(old_plan)
+  finally = future::plan(old_plan_nonprop)
 )
 end.time <- Sys.time()
 end.time - start.time
@@ -354,7 +356,7 @@ names(results_nonprop) <- with(
   paste0(
     "n=", n,
     "_beta=", beta,
-    "_time_effect=", time_effect
+    "_delta=", delta
   )
 )
 
@@ -366,22 +368,47 @@ results_df_nonprop <- lapply(results_nonprop, function(sim_result) {
 results_df_nonprop <- data.frame(do.call(rbind, results_df_nonprop))
 colnames(results_df_nonprop) <- c("n", 
                           "beta", 
-                          "time_effect",
+                          "delta",
                           "mult_test_p_value", 
                           "log_rank_p_value")
 
 
 
 # Summarize results
-summary_results_nonprop <- results_df_nonprop %>% 
-  group_by(n, beta, time_effect) %>%                               
-  summarise(LogRankLevel = mean(log_rank_p_value > 0.05 & beta == 0),
-            TwoStepLevel = mean(mult_test_p_value > 0.05 & beta == 0),
-            LogRankPower = mean(log_rank_p_value < 0.05 & beta != 0),
-            TwoStepPower = mean(mult_test_p_value < 0.05 & beta != 0),
-            .groups = "drop") %>%
-  arrange(n, beta, time_effect)
+summary_results_nonprop <- results_df_nonprop %>%
+  group_by(n, beta, delta) %>%
+  summarise(
+    LogRankReject = mean(log_rank_p_value <= alpha_nonprop),
+    TwoStepReject = mean(mult_test_p_value <= alpha_nonprop),
+    n_rep = dplyr::n(),
+    .groups = "drop"
+  ) %>%
+  mutate(
+    is_null = beta == 0 & delta == 0,
+    LogRankLevel = if_else(is_null, LogRankReject, NA_real_),
+    TwoStepLevel = if_else(is_null, TwoStepReject, NA_real_),
+    LogRankPower = if_else(!is_null, LogRankReject, NA_real_),
+    TwoStepPower = if_else(!is_null, TwoStepReject, NA_real_)
+  ) %>%
+  arrange(n, beta, delta)
 
 
+p_levels_nonprop <- ggplot_empirical_levels_nonprop(
+  summary_results_nonprop, alpha = alpha_nonprop
+)
+p_power_nonprop <- ggplot_empirical_power_nonprop(summary_results_nonprop)
+p_combined_nonprop <- combine_article_plots_nonprop(
+  p_levels_nonprop, p_power_nonprop, alpha = alpha_nonprop
+)
+print(p_combined_nonprop)
+
+
+ggsave(
+  "survival_non_prop_simulation_combined.pdf",
+  plot = p_combined_nonprop,
+  width = 200, height = 100, units = "mm",
+  device = grDevices::pdf,
+  useDingbats = FALSE, bg = "white"
+)
 
 
