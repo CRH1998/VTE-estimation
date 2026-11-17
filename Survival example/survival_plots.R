@@ -91,7 +91,7 @@ ggplot_empirical_levels <- function(summary_results, alpha = 0.05) {
     ))
 
   ggplot(plot_data, aes(
-    x = n, y = (1 - empirical_level), linetype = test, shape = test
+    x = n, y = empirical_level, linetype = test, shape = test
   )) +
     geom_hline(yintercept = alpha, linetype = "dotted",
                colour = "grey50", linewidth = 0.45) +
@@ -315,7 +315,7 @@ theme_article_nonprop <- function(base_size = 12, base_family = "serif") {
 # can be used in the same R session.
 np_beta_levels <- sort(unique(summary_results_nonprop$beta))
 np_delta_levels <- sort(unique(summary_results_nonprop$delta), decreasing = TRUE)
-np_test_levels <- c("Log-rank", "Multiplier")
+np_test_levels <- c("Log-rank", "Two-Step")
 np_palette <- c("#000000", "#0072B2", "#D55E00", "#009E73", "#CC79A7",
                 "#E69F00", "#56B4E9")
 np_shapes <- c(16, 17, 15, 18, 3, 7, 8)
@@ -326,7 +326,7 @@ np_delta_colours <- setNames(np_palette[seq_along(np_delta_levels)],
                              as.character(np_delta_levels))
 np_beta_shapes <- setNames(np_shapes[seq_along(np_beta_levels)],
                            as.character(np_beta_levels))
-np_test_linetypes <- c("Log-rank" = "solid", "Multiplier" = "dashed")
+np_test_linetypes <- c("Log-rank" = "solid", "Two-Step" = "dashed")
 np_coefficient_labels <- function(x) sprintf("%.2f", as.numeric(as.character(x)))
 
 nonprop_scales <- function() {

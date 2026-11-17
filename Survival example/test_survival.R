@@ -124,7 +124,7 @@ tau <- 2            # Upper time limit
 n_values <- c(400, 800, 1200, 1600, 2000, 3000) # Sample sizes to test
 beta_values <- c(0, 0.09531018, 0.1823216, 0.2623643, 0.4054651) # Corresponding to HR = 1, 1.1, 1.2, 1.3, 1.5
 
-n_rep <- 100L        # Number of replicates per setting
+n_rep <- 250L        # Number of replicates per setting
 
 settings <- expand.grid(
   n = n_values,
@@ -292,7 +292,7 @@ run_one_nonproportional <- function(n, beta, delta, p, rate, tau, K = 2L, n_boot
 # 2.2 Simulation study settings for non-proportional hazards
 #-------------------------------------------------------------------------------
 
-seed <- 16112026    # Random seed for reproducibility
+seed <- 17112026    # Random seed for reproducibility
 p <- 0.5            # Probability of treatment assignment
 rate <- 1           # Rate parameter
 tau <- 2            # Upper time limit
@@ -301,7 +301,7 @@ beta_values <- c(0, 0.4054651)                                   # Baseline log 
 delta_values <- c(0, -0.4054651, -0.6931472, -1.098612)          # Time-dependent effect values
 alpha_nonprop <- 0.05
 
-n_rep_nonprop <- 20L                                              # Number of replicates per setting
+n_rep_nonprop <- 250L                                            # Number of replicates per setting
 
 settings_nonprop <- expand.grid(
   n = n_values,
@@ -343,7 +343,7 @@ end.time <- Sys.time()
 end.time - start.time
 
 #-------------------------------------------------------------------------------
-# 1.4 Process the results
+# 2.4 Process the results
 #-------------------------------------------------------------------------------  
 # One list element per setting, with replicates in columns
 results_nonprop <- lapply(seq_len(nrow(settings_nonprop)), function(j) {
@@ -400,7 +400,7 @@ p_power_nonprop <- ggplot_empirical_power_nonprop(summary_results_nonprop)
 p_combined_nonprop <- combine_article_plots_nonprop(
   p_levels_nonprop, p_power_nonprop, alpha = alpha_nonprop
 )
-print(p_combined_nonprop)
+#print(p_combined_nonprop)
 
 
 ggsave(
