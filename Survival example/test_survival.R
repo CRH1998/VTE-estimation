@@ -229,7 +229,7 @@ p_combined <- combine_article_plots(p_levels, p_power, p_rmse)
 # print(p_levels)
 # print(p_power)
 # print(p_rmse)
-# print(p_combined)
+print(p_combined)
 
 
 ggsave(
@@ -400,7 +400,7 @@ p_power_nonprop <- ggplot_empirical_power_nonprop(summary_results_nonprop)
 p_combined_nonprop <- combine_article_plots_nonprop(
   p_levels_nonprop, p_power_nonprop, alpha = alpha_nonprop
 )
-#print(p_combined_nonprop)
+print(p_combined_nonprop)
 
 
 ggsave(
