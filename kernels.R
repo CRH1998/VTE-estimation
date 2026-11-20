@@ -101,21 +101,10 @@ median_gaussian_bandwidth <- function(reference, max_pairs = Inf) {
       max_pairs < 1 || max_pairs != floor(max_pairs)) {
     stop("max_pairs must be a positive integer or Inf.")
   }
-  if (max_pairs >= choose(n, 2L)) {
-    d2 <- as.numeric(stats::dist(X))^2
-  } else {
-    # Draw distinct indices within each pair. Both orientations are equiprobable.
-    i <- sample.int(n, max_pairs, replace = TRUE)
-    j <- sample.int(n - 1L, max_pairs, replace = TRUE)
-    j <- j + (j >= i)
-    storage.mode(X) <- "double"
-    d2 <- numeric(max_pairs)
-    for (p in seq_len(ncol(X))) {
-      delta <- X[i, p] - X[j, p]
-      d2 <- d2 + delta^2
-    }
-  }
+  
+  d2 <- as.numeric(stats::dist(X))^2
   sigma <- sqrt(stats::median(d2))
+  
   if (!is.finite(sigma)) stop("The bandwidth is non-finite. Check the covariate scales.")
   if (sigma <= 0) {
     stop("The median pairwise distance is zero. Check for duplicate rows or supply a positive bandwidth.")

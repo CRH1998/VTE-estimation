@@ -13,19 +13,23 @@ library(future)
 ############################################################
 #                         Dependencies                     #
 ############################################################
-# Testing functions and code
-source("/Users/christianhejstvig-larsen/Desktop/Studie/Master/Cambridge/Essay/R/Part-III-Essay-Repo/Estimation functions.R")
-source("/Users/christianhejstvig-larsen/Desktop/Studie/Master/Cambridge/Essay/R/Part-III-Essay-Repo/Simulations.R")
-source("/Users/christianhejstvig-larsen/Desktop/Studie/Master/Cambridge/Essay/R/code-JASA/np-qualint-JASA.R")
-source("nuisance_func.R")
+setwd(dirname(rstudioapi::getActiveDocumentContext()$path))
 
+# Testing functions and code
+source("SBfunctions.R")     # Sánchez-Becerra (2023)
+source("np-qualint-JASA.R") # Dukes et al. (2026)
+source("PMfunctions.R")     # Morzywołek et al. (2026)
+source("nuisance_func.R")
+source("embedded_u_statistic.R")
+source("u_statistic_crossfit.R")
+source("simulations.R")
 
 
 run_one <- function(n, sim_type = c("SB", "Dukes", "Hines", "PM"), randomized = TRUE, pi_hat = 0.5, seed = NA,
                     J, tau = 0.15,                                                                    # SB simulation settings
                     heterogeneity = c("None", "QuantHMC", "QuantHNMC"), heterogeneity_degree,         # Dukes simulation settings
-                    sigma = 0.5, alternative_type = "smooth", sim_scenario = "regular",   # PM simulation settings
-                    analysis_type = c("SB", "Dukes", "CRH"),                                          # Analysis type
+                    sigma = 0.5, alternative_type = "smooth", sim_scenario = "regular",               # PM simulation settings
+                    analysis_type = c("SB", "Dukes", "CRH", "PM"),                                    # Analysis type
                     family = gaussian(), K = 2, hal = F,                                              # Analysis settings
                     SL.lib = list("SL.glmnet", "SL.xgboost", "SL.ranger", "SL.mean"), 
                     i = NA_integer_) {
@@ -79,11 +83,7 @@ run_one <- function(n, sim_type = c("SB", "Dukes", "Hines", "PM"), randomized = 
       V_tau <- beta^2 / 12
     } else if (sim_scenario == "reduced" && alternative_type == "rough") {
       V_tau <- beta^2 * 0.5 * (1 - exp(-50 * pi^2)) / 12
-    } else if (sim_scenario == "HD10") {
-      V_tau <- 0.5
-    } else {
-      stop("Invalid simulation scenario.")
-    }  
+    } 
     print(paste("Running simulation", i, "with n =", n))
     
   } else {
@@ -96,6 +96,7 @@ run_one <- function(n, sim_type = c("SB", "Dukes", "Hines", "PM"), randomized = 
   V_taun <- NA
   DukesP <- NA
   CRHP <- NA
+  PMP <- NA
   
   # Choose analysis type
   if ("SB" %in% analysis_type) {
@@ -153,7 +154,39 @@ run_one <- function(n, sim_type = c("SB", "Dukes", "Hines", "PM"), randomized = 
       keep_pair_scores = TRUE
     )
     CRHP <- bootstrap_embedded_u(CRH_CF, B = 3999L, alpha = 0.05)$p_value
-  }  
+  } 
+  
+  if ("PM" %in% analysis_type) {
+    if (sim_scenario == "reduced"){
+      X_dim <- 3
+    } else if (sim_scenario == "regular"){
+      X_dim <- 5
+    } else if (sim_scenario == "HD10"){
+      X_dim <- 10
+    } else if (sim_scenario == "HD"){
+      X_dim <- 20
+    }
+    
+    VIM_method <- "LOCO"
+    V1 <- paste0("X", seq_len(X_dim))
+    test_variable <- V1
+    nuisance_learner <- "SL"
+    
+    PM <- importance_test(data = data,
+                          V=V1, 
+                          test_variable=test_variable,
+                          X_dim=X_dim, 
+                          n_boot=3999L,
+                          alpha=0.05,
+                          VIM_method=VIM_method,
+                          nuisance_learner=nuisance_learner,
+                          randomized=randomized,
+                          pi_hat=pi_hat,
+                          SL.lib = SL.lib,
+                          sim_scenario=sim_scenario)
+    PM_test_reject <- PM$one_step_RKHSnorm_squared0 > PM$zeta_hat0/n
+    
+  }
   
   
   return(list(n = n,
@@ -164,7 +197,8 @@ run_one <- function(n, sim_type = c("SB", "Dukes", "Hines", "PM"), randomized = 
               ci_low_multifold = ci_low_multifold,
               ci_high_multifold = ci_high_multifold,
               DukesP = DukesP,
-              CRHP = CRHP))
+              CRHP = CRHP,
+              PM_test_reject = PM_test_reject))
 }
 
 
@@ -182,10 +216,10 @@ run_one <- function(n, sim_type = c("SB", "Dukes", "Hines", "PM"), randomized = 
 seed <- sample(1:1e6, 1)
 
 # Heterogeneity specific parameters
-heterogeneity_degree <- c(0, 0.5, 1.0)    # Corresponding to beta values for PM simulations
+heterogeneity_degree <- c(0, 0.5, 1.0)     #c(0, 0.5, 1.0)    # Corresponding to beta values for PM simulations
 
 # Number of observations for each simulation setting
-n_values <- c(400, 800, 1200, 1600)
+n_values <- c(400, 800, 1200, 1600, 2000)
 
 # Simulation type and settings
 sim_type <- "PM"                      # Type of simulation ("SB", "Dukes", "Hines", "PM")
@@ -194,8 +228,8 @@ pi_hat <- 0.5
 
 
 # PM specific settings
-sigma <- c(0.1, 0.4, 0.8)             # Correlation parameter for the copula
-alternative_type <- "rough"          # Type of alternative hypothesis ("smooth" or "rough")
+sigma <- c(0.8)# c(0.1, 0.4, 0.8)# Correlation parameter for the copula
+alternative_type <- "smooth"          # Type of alternative hypothesis ("smooth" or "rough")
 sim_scenario <- "reduced"             # Simulation scenario ("reduced", "regular" or "HD10")
 
 
@@ -203,7 +237,7 @@ sim_scenario <- "reduced"             # Simulation scenario ("reduced", "regular
 # 1.1 Analysis settings
 #-------------------------------------------------------------------------------
 # Analysis type and settings
-analysis_type <- c("SB", "CRH", "Dukes")
+analysis_type <- c("SB", "CRH", "PM")
 K <- 2                                      # Number of folds for cross-fitting SuperLearners
 hal <- FALSE                                # Whether to use HAL instead of SuperLearner for nuisance function estimation
 SL.lib <- list("SL.glmnet", "SL.xgboost", "SL.ranger", "SL.mean")
@@ -212,7 +246,7 @@ SL.lib <- list("SL.glmnet", "SL.xgboost", "SL.ranger", "SL.mean")
 #-------------------------------------------------------------------------------
 # 1.2 Simulation study settings
 #-------------------------------------------------------------------------------
-n_rep <- 20L
+n_rep <- 10L
 
 settings <- expand.grid(
   n = n_values,
@@ -287,7 +321,7 @@ names(results) <- with(
 
 # Process results
 results_df <- lapply(results, function(sim_result) {
-  matrix(unlist(sim_result), ncol = 9, byrow = T)
+  matrix(unlist(sim_result), ncol = 10, byrow = T)
 })
 results_df <- data.frame(do.call(rbind, results_df))
 colnames(results_df) <- c("n", 
@@ -298,24 +332,16 @@ colnames(results_df) <- c("n",
                           "ci_low_multifold", 
                           "ci_high_multifold",
                           "DukesP",
-                          "CRHP")
+                          "CRHP",
+                          "PM_test_reject")
 
 
+source("heterogeneity_plots.R")
 
-# Summarize results
-summary_results <- results_df %>% 
-  group_by(n, V_tau, Sigma) %>%                               # Change between group_by(V_tau) and group_by(n)
-  summarise(SBLevel = mean(coverage_multifold),
-            SBPower = mean(ci_low_multifold > 0),
-            DukesLevel = mean(DukesP > 0.05 & V_tau == 0),
-            DukesPower = mean(DukesP < 0.05 & V_tau > 0),
-            CRHLevel = mean(CRHP > 0.05 & V_tau == 0),
-            CRHPower = mean(CRHP < 0.05 & V_tau > 0),
-            V_taun = mean(V_taun),
-            ci_low_multifold = mean(ci_low_multifold),
-            ci_high_multifold = mean(ci_high_multifold))
-summary_results$reps <- n_rep
-
+pm_alpha <- 0.05  # Match the level used to construct the SB interval and the PM decision.
+pm_summary <- pm_rejection_summary(results_df, settings, setting_index, analysis_type, pm_alpha)
+pm_plots <- pm_rejection_plots(pm_summary, pm_alpha)
+print(pm_plots$combined)
 
 
 #Save results df as txt

@@ -1,3 +1,125 @@
+############################################################
+#                                                          #
+#   The following script contains functions to estimate    #
+#   the cross-fitted U-statistic for the embedded centred  #
+#   conditional average treatment effect. It uses the      #
+#   nuisance functions estimated in nuisance_func.R to     #
+#   estimate the U-statistic for each block of pairs. The  #
+#   final estimate is the average of the block estimates.  #
+#                                                          #
+#   The script also includes a function to perform an      #
+#   i.i.d. multiplier bootstrap for the constant-CATE null #
+#   hypothesis. It uses the saved pairwise scores from     #
+#   crossfit_embedded_u() to generate bootstrap draws and  #
+#   compute the critical value and p-value for the test.   #
+#   The bootstrap is based on the Dehling and Mikosch (1994)# 
+#   result that the oracle pair kernel is degenerate under #
+#   the null.                                              #
+#                                                          #
+############################################################
+
+
+############################################################
+#                         Dependencies                     #
+############################################################
+
+# Load helper functions
+source("nuisance_func.R")
+
+
+
+
+
+############################################################
+#   Helper function to compute the block sum of the        #
+#   U-statistic for a given outer block and inner fit.     #
+############################################################
+
+# For one outer block and one inner fit, return the sum or the individual kernels
+.eu_block_sum <- function(s, z, x, b, keep_pair_scores = FALSE) {
+  
+  
+  #-----------------------------------------------------------------------------
+  # 1.0 Calculate the estimated nuisance parameters using the inner fit s and the evaluation data z.
+  #-----------------------------------------------------------------------------
+  # Retrieve the R term from the inner fit.
+  r <- s$residual(a = z$A, y = z$Y, x = x)
+  ec <- s$embedded_cate(x)
+  mn <- s$mean_embedding
+  cc <- s$centred_cate(x)
+  psik <- s$embedding_norm_sq
+  
+  # Calculate the first-order influence function term
+  h <- 2 * ((ec - mn) * (r + cc) - psik)
+  
+  
+  #-----------------------------------------------------------------------------
+  # 2.0 Prepare the left and right indices for the block.
+  #-----------------------------------------------------------------------------
+  # Identify the block type. Triangles have only one side, rectangles have two.
+  triangle <- identical(b$type, "triangle")
+  
+  # Make left and right the local row indices for the block. In a triangle, right is empty.
+  left <- seq_along(b$left)
+  right <- if (triangle) left else length(left) + seq_along(b$right)
+  
+  
+  #-----------------------------------------------------------------------------
+  # 3.0 Construct the centred kernel matrix for the block using the inner fit s and the evaluation data x.
+  #-----------------------------------------------------------------------------
+  kc <- s$centred_kernel(x[left, , drop = FALSE], x[right, , drop = FALSE])
+  if (length(kc) != as.double(length(left)) * length(right)) {
+    stop("centred_kernel returned the wrong number of pair values.")
+  }
+  
+  # Restore the matrix shape when either side of a rectangle has one row.
+  kc <- matrix(kc, nrow = length(left), ncol = length(right))
+  
+  
+  #-----------------------------------------------------------------------------
+  # 4.0 Compute the pairwise kernels for the block and return the sum.
+  #-----------------------------------------------------------------------------
+  # In a triangle use i < j in the local group order. In a rectangle every
+  # left/right combination is one unordered pair, regardless of row labels.
+  # Initialize the sums vector
+  sums <- numeric(length(right))
+  
+  for (col in seq_along(right)) {
+    
+    # Define the local row indices for the left and right sides of the block.
+    i <- if (triangle) seq_len(col - 1L) else left
+    j <- right[col]
+
+    
+    # Calculate the pairwise kernels
+    values <- psik + 1/2 * (h[i] + h[j] + 2 * r[i] * r[j] * kc[i, col])
+    
+    if (any(!is.finite(values))) stop("A pair score is non-finite.")
+    
+    if (keep_pair_scores) {
+      # Store pairwise scores for bootstrap_embedded_u(). The kernel is symmetric, so only one triangle is needed.
+      # Reuse the kernel column's storage. Unused triangle entries stay zero.
+      kc[, col] <- 0
+      kc[i, col] <- values
+      
+    } else {
+      
+      sums[col] <- sum(values)
+      
+    }
+  }
+  if (keep_pair_scores) kc else sum(sums)
+}
+
+
+
+
+############################################################
+#   Calculate the cross-fitted U-statistic for the         #
+#   embedded centred CATE                                  #
+############################################################
+
+
 #' Cross-fitted U-statistic for the embedded centred CATE
 #'
 #' Source u_statistic_crossfit.R and nuisance_func.R before calling this
@@ -97,14 +219,17 @@ crossfit_embedded_u <- function(data, pair_folds, ..., keep_pair_scores = FALSE)
   
   for (l in seq_along(blocks)) {
     
+    # Retrieve the l-th outer block and its training complement b$train.
     b <- blocks[[l]]
     
+    # Compute the contribution of this outer block to the overall U-statistic. 
+    # The inner folds are averaged within nuisance_func() using fit$average().
     contribution <- tryCatch({
       
       # Train the nuisance functions on the training complement of this outer block.
       fit <- nuisance_func(train_data = data[b$train, , drop = FALSE], ...)
       
-      # Local positions in z are the left rows followed by the right rows.
+      # Select the evaluation rows for this outer block and the covariates used in the nuisance fit.
       z <- data[c(b$left, b$right), , drop = FALSE]
       x <- z[, fit$x_names, drop = FALSE]
       
@@ -155,66 +280,6 @@ crossfit_embedded_u <- function(data, pair_folds, ..., keep_pair_scores = FALSE)
   
   return(result)
   
-}
-
-
-
-
-# For one outer block and one inner fit, return the sum or the individual
-# kernels Triangles store only the strict upper triangle in local row order.
-.eu_block_sum <- function(s, z, x, b, keep_pair_scores = FALSE) {
-  
-  # Retrieve the R term from the inner fit.
-  r <- s$residual(a = z$A, y = z$Y, x = x)
-  
-  # Calculate the first-order influence function term
-  h <- (s$embedded_cate(x) - s$mean_embedding) * (r + s$centred_cate(x))
-  
-  # Identify the block type. Triangles have only one side, rectangles have two.
-  triangle <- identical(b$type, "triangle")
-  
-  # Make left and right the local row indices for the block. In a triangle, right is empty.
-  left <- seq_along(b$left)
-  right <- if (triangle) left else length(left) + seq_along(b$right)
-  
-  
-  # Restore the matrix shape when either side of a rectangle has one row.
-  kc <- s$centred_kernel(x[left, , drop = FALSE], x[right, , drop = FALSE])
-  if (length(kc) != as.double(length(left)) * length(right)) {
-    stop("centred_kernel returned the wrong number of pair values.")
-  }
-  kc <- matrix(kc, nrow = length(left), ncol = length(right))
-  
-  
-  # In a triangle use i < j in the local group order. In a rectangle every
-  # left/right combination is one unordered pair, regardless of row labels.
-  # Initialize the sums vector
-  sums <- numeric(length(right))
-  
-  for (col in seq_along(right)) {
-    
-    # Define the local row indices for the left and right sides of the block.
-    i <- if (triangle) seq_len(col - 1L) else left
-    j <- right[col]
-    
-    # Calculate the pairwise kernels
-    values <- h[i] + h[j] + r[i] * r[j] * kc[i, col] - s$embedding_norm_sq
-    
-    if (any(!is.finite(values))) stop("A pair score is non-finite.")
-    
-    if (keep_pair_scores) {
-      # Store pairwise scores for bootstrap_embedded_u(). The kernel is symmetric, so only one triangle is needed.
-      # Reuse the kernel column's storage. Unused triangle entries stay zero.
-      kc[, col] <- 0
-      kc[i, col] <- values
-      
-    } else {
-      
-      sums[col] <- sum(values)
-      
-    }
-  }
-  if (keep_pair_scores) kc else sum(sums)
 }
 
 

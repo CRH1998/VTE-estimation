@@ -237,7 +237,7 @@ nuisance_func <- function(train_data,
     }
     
     # Fit the nuisance functions for the current split using the regression and marginal samples.
-    s <- .nf_fit_split(
+    fit <- .nf_fit_split(
       X_reg = X[r, , drop = FALSE], 
       A_reg = A[r], 
       Y_reg = Y[r],
@@ -253,9 +253,9 @@ nuisance_func <- function(train_data,
       SL.env = SL.env
     )
     
-    s$regression_rows <- r
-    s$marginal_rows <- m
-    s
+    fit$regression_rows <- r
+    fit$marginal_rows <- m
+    fit
   })
 
   
@@ -329,7 +329,9 @@ nuisance_func <- function(train_data,
 #'
 #' @examples
 .nf_fit_split <- function(X_reg, A_reg, Y_reg, U, 
-                          kernel, family, bandwidth_pairs = Inf, 
+                          kernel, bandwidth = NULL,
+                          family, 
+                          bandwidth_pairs = Inf, 
                           randomized, pi_hat, 
                           hal,
                           K, SL.lib, SL.env) {
@@ -413,7 +415,7 @@ nuisance_func <- function(train_data,
   cate <- function(x) mu(1, x) - mu(0, x)
   
   #-----------------------------------------------------------------------------
-  # 3.2 Fit pi(x)
+  # 3.2 Fit propensity score pi(x)
   #-----------------------------------------------------------------------------
   # The treatment model uses raw covariates, with no treatment interactions.
   fit_pi <- NULL
