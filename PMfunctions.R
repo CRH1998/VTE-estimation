@@ -364,7 +364,7 @@ importance_test = function(V, test_variable, X_dim, n, n_boot, alpha,
   
   
   # Choose the bandwidth for the kernel based on the "median heuristic"
-  bandwidth <- median(dist(X)^2)/2
+  bandwidth <- 2 * median(dist(X)^2)
   
   if (VIM_method=="LOCO"){
     

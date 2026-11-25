@@ -133,7 +133,8 @@ nuisance_func <- function(train_data,
                           randomized = TRUE, 
                           pi_hat = 0.5, 
                           K = 2L,
-                          kernel = .nf_gaussian_kernel, 
+                          kernel = .nf_gaussian_kernel,
+                          bandwidth = NULL,
                           fold_id = NULL,
                           bandwidth_pairs = Inf,
                           SL.env = NULL) {
@@ -243,6 +244,7 @@ nuisance_func <- function(train_data,
       Y_reg = Y[r],
       U = X[m, , drop = FALSE], 
       kernel = kernel,
+      bandwidth = bandwidth,
       bandwidth_pairs = bandwidth_pairs,
       family = family,
       hal = hal, 
@@ -343,8 +345,8 @@ nuisance_func <- function(train_data,
   if (identical(kernel, "median")) {
     kernel <- make_median_gaussian_kernel(X_reg, max_pairs = bandwidth_pairs)
   }
-  sigma <- if (identical(kernel, .nf_gaussian_kernel)) 1 else attr(kernel, "sigma", exact = TRUE)
-  
+  # sigma <- if (identical(kernel, .nf_gaussian_kernel)) 1 else attr(kernel, "sigma", exact = TRUE)
+  #kernel <- function(x, y) .nf_gaussian_kernel(x, y, sigma = bandwidth)
   
   #-----------------------------------------------------------------------------
   # 1.0 Prepare data

@@ -11,10 +11,10 @@ library(ggplot2)
 pm_rejection_summary <- function(results_df, settings, setting_index, analysis_type,
                                  alpha = 0.05) {
   analyses <- unique(as.character(analysis_type))
-  outcome <- c(SB = "ci_low_multifold", CRH = "CRHP", PM = "PM_test_reject",
+  outcome <- c(SB = "ci_low_multifold", TwoStep = "CRHP", PM = "PM_test_reject",
                Dukes = "DukesP")
-  stopifnot(length(analyses) > 0L, all(analyses %in% names(outcome)),
-            all(c("n", "Sigma", unname(outcome[analyses])) %in% names(results_df)))
+  # stopifnot(length(analyses) > 0L, all(analyses %in% names(outcome)),
+  #           all(c("n", "Sigma", unname(outcome[analyses])) %in% names(results_df)))
   
   number <- function(x) as.numeric(if (is.factor(x)) as.character(x) else x)
   n_obs <- number(results_df$n)
@@ -60,8 +60,8 @@ pm_rejection_summary <- function(results_df, settings, setting_index, analysis_t
     summarise(n_total = dplyr::n(), n_used = sum(!is.na(reject)),
               n_reject = sum(reject, na.rm = TRUE), .groups = "drop") %>%
     mutate(rejection_rate = if_else(n_used > 0, n_reject / n_used, NA_real_),
-           panel = factor(if_else(beta == 0, "Empirical level", "Empirical power"),
-                          levels = c("Empirical level", "Empirical power"))) %>%
+           panel = factor(if_else(beta == 0, "Type I error", "Power"),
+                          levels = c("Type I error", "Power"))) %>%
     group_by(analysis, beta, sigma) %>%
     mutate(curve_id = cur_group_id()) %>%
     ungroup() %>%
@@ -82,8 +82,8 @@ pm_rejection_plots <- function(rates, alpha = 0.05, sigma_value = NULL) {
   }
   rates <- rates[rates$sigma == sigma_value, , drop = FALSE]
   
-  method_lines <- c(SB = "solid", CRH = "dashed", PM = "dotdash", Dukes = "longdash")
-  method_shapes <- c(SB = 16, CRH = 17, PM = 15, Dukes = 18)
+  method_lines <- c(SB = "solid", TwoStep = "dashed", PM = "dotdash", Dukes = "longdash")
+  method_shapes <- c(SB = 16, TwoStep = 17, PM = 15, Dukes = 18)
   methods <- unique(as.character(rates$analysis))
   betas <- sort(unique(rates$beta))
   alternatives <- betas[betas != 0]
@@ -105,12 +105,12 @@ pm_rejection_plots <- function(rates, alpha = 0.05, sigma_value = NULL) {
     # default alpha), and every observed level, even if there is substantial inflation.
     anchors <- distinct(data, panel) %>%
       mutate(n = min(sample_sizes),
-             upper = if_else(panel == "Empirical power", 1, min(1, 2 * alpha)))
-    reference <- filter(anchors, panel == "Empirical level") %>% mutate(target = alpha)
-    reference_note <- if (nrow(reference) > 0L) {
-      paste0(" The dotted line marks the ", percent_labels(alpha), " reference level.")
-    } else ""
-    caption <- bquote(paste(sigma, " = ", .(sigma_value), ".", .(reference_note)))
+             upper = if_else(panel == "Power", 1, min(1, 2 * alpha)))
+    reference <- filter(anchors, panel == "Type I error") %>% mutate(target = alpha)
+    #reference_note <- if (nrow(reference) > 0L) {
+    #  paste0(" The dotted line marks the ", percent_labels(alpha), " reference level.")
+    #} else ""
+    #caption <- bquote(paste(sigma, " = ", .(sigma_value), ".", .(reference_note)))
     
     g <- ggplot(data, aes(x = n, y = rejection_rate)) +
       geom_blank(data = anchors, aes(x = n, y = upper), inherit.aes = FALSE) +
@@ -137,7 +137,7 @@ pm_rejection_plots <- function(rates, alpha = 0.05, sigma_value = NULL) {
         shape = guide_legend(order = 1, nrow = 1)
       ) +
       labs(title = title, x = expression("Sample size (" * italic(n) * ")"),
-           y = "Rejection rate", caption = caption) +
+           y = "Rejection rate") + #, caption = caption
       theme_classic(base_size = 11, base_family = "serif") +
       theme(
         panel.grid.major.x = element_line(colour = "grey89", linewidth = 0.3),
@@ -146,7 +146,7 @@ pm_rejection_plots <- function(rates, alpha = 0.05, sigma_value = NULL) {
         strip.background = element_blank(),
         strip.text = element_text(face = "bold", hjust = 0),
         plot.title = element_text(face = "bold", hjust = 0),
-        plot.caption = element_text(hjust = 0, size = 9),
+        #plot.caption = element_text(hjust = 0, size = 9),
         legend.position = "bottom", legend.box = "horizontal",
         legend.key.width = grid::unit(0.85, "cm"),
         panel.spacing.x = grid::unit(6, "mm")
@@ -157,16 +157,16 @@ pm_rejection_plots <- function(rates, alpha = 0.05, sigma_value = NULL) {
   }
   
   list(
-    level = draw(filter(rates, beta == 0), "Empirical level"),
-    power = draw(filter(rates, beta != 0), "Empirical power"),
-    combined = draw(rates, "Testing for treatment effect heterogeneity", combined = TRUE)
+    level = draw(filter(rates, beta == 0), "Type I error"),
+    power = draw(filter(rates, beta != 0), "Power"),
+    combined = draw(rates, "", combined = TRUE) #Testing for treatment effect heterogeneity
   )
 }
 
-pm_alpha <- 0.05  # Match the level used to construct the SB interval and the PM decision.
-pm_summary <- pm_rejection_summary(results_df, settings, setting_index, analysis_type, pm_alpha)
-pm_plots <- pm_rejection_plots(pm_summary, pm_alpha, sigma_value = get0("pm_sigma", inherits = FALSE))
-print(pm_plots$combined)
+# pm_alpha <- 0.05  # Match the level used to construct the SB interval and the PM decision.
+# pm_summary <- pm_rejection_summary(results_df, settings, setting_index, analysis_type, pm_alpha)
+# pm_plots <- pm_rejection_plots(pm_summary, pm_alpha, sigma_value = get0("pm_sigma", inherits = FALSE))
+# print(pm_plots$combined)
 
 # Use print(pm_plots$level) or print(pm_plots$power) to display a single panel.
 # To count the curves drawn at the selected sigma, run

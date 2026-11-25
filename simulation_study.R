@@ -138,6 +138,8 @@ run_one <- function(n, sim_type = c("SB", "Dukes", "Hines", "PM"), randomized = 
     
   if ("CRH" %in% analysis_type) {
     
+    #median_bandwidth <- sqrt(median(as.numeric(dist(data[, -c(1, 2)]))^2))
+    
     plan <- make_pair_folds(nrow(data), K = 2L)
     
     CRH_CF <- crossfit_embedded_u(
@@ -150,6 +152,7 @@ run_one <- function(n, sim_type = c("SB", "Dukes", "Hines", "PM"), randomized = 
       randomized = randomized, 
       pi_hat = pi_hat,
       kernel = "median",
+      bandwidth = median_bandwidth,
       bandwidth_pairs = 50000L,
       keep_pair_scores = TRUE
     )
@@ -213,10 +216,10 @@ run_one <- function(n, sim_type = c("SB", "Dukes", "Hines", "PM"), randomized = 
 # 1.0 Simulation of data settings
 #-------------------------------------------------------------------------------
 # Set a random seed
-seed <- sample(1:1e6, 1)
+seed <- 21112026#sample(1:1e6, 1)
 
 # Heterogeneity specific parameters
-heterogeneity_degree <- c(0, 0.5, 1.0)     #c(0, 0.5, 1.0)    # Corresponding to beta values for PM simulations
+heterogeneity_degree <- c(0, 0.7, 1.4) # (rough)    c(0, 0.5, 1.0) (smooth)    Corresponding to beta values for PM simulations
 
 # Number of observations for each simulation setting
 n_values <- c(400, 800, 1200, 1600, 2000)
@@ -229,8 +232,8 @@ pi_hat <- 0.5
 
 # PM specific settings
 sigma <- c(0.8)# c(0.1, 0.4, 0.8)# Correlation parameter for the copula
-alternative_type <- "smooth"          # Type of alternative hypothesis ("smooth" or "rough")
-sim_scenario <- "reduced"             # Simulation scenario ("reduced", "regular" or "HD10")
+alternative_type <- "rough"          # Type of alternative hypothesis ("smooth" or "rough")
+sim_scenario <- "reduced"            # Simulation scenario ("reduced", "regular" or "HD10")
 
 
 #-------------------------------------------------------------------------------
@@ -246,7 +249,7 @@ SL.lib <- list("SL.glmnet", "SL.xgboost", "SL.ranger", "SL.mean")
 #-------------------------------------------------------------------------------
 # 1.2 Simulation study settings
 #-------------------------------------------------------------------------------
-n_rep <- 10L
+n_rep <- 200L
 
 settings <- expand.grid(
   n = n_values,
@@ -339,15 +342,31 @@ colnames(results_df) <- c("n",
 source("heterogeneity_plots.R")
 
 pm_alpha <- 0.05  # Match the level used to construct the SB interval and the PM decision.
-pm_summary <- pm_rejection_summary(results_df, settings, setting_index, analysis_type, pm_alpha)
+pm_summary <- pm_rejection_summary(results_df, settings, setting_index, c("SB","TwoStep", "PM"), pm_alpha)
 pm_plots <- pm_rejection_plots(pm_summary, pm_alpha)
 print(pm_plots$combined)
 
 
 #Save results df as txt
-#write.table(results_df, file = "/Users/christianhejstvig-larsen/Desktop/Studie/Master/Cambridge/Essay/R/Part-III-Essay-Repo/DukesSimulations16042026.txt", row.names = FALSE, col.names = TRUE, sep = "\t")
+#write.table(results_df, file = "smooth_sim_results21112026.txt", row.names = FALSE, col.names = TRUE, sep = "\t")
+
+# ggsave(
+#   "smooth_sim_results21112026.pdf",
+#   plot = pm_plots$combined,
+#   width = 200, height = 100, units = "mm",
+#   device = grDevices::pdf,
+#   useDingbats = FALSE, bg = "white"
+# )
 
 
+# write.table(results_df, file = "rough_sim_results21112026.txt", row.names = FALSE, col.names = TRUE, sep = "\t")
+# ggsave(
+#   "rough_sim_results21112026.pdf",
+#   plot = pm_plots$combined,
+#   width = 200, height = 100, units = "mm",
+#   device = grDevices::pdf,
+#   useDingbats = FALSE, bg = "white"
+# )
 
 
 
