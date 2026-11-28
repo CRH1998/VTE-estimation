@@ -28,7 +28,7 @@
 # 1.0 Simulation of data settings
 #-------------------------------------------------------------------------------
 # Set a random seed
-seed <- 26112026 #sample(1:1e6, 1)
+seed <- 21112026 #sample(1:1e6, 1)
 
 # Heterogeneity specific parameters
 heterogeneity_degree <- c(0, 0.5, 1.0) #(smooth) #c(0, 0.7, 1.4) # (rough)        Corresponding to beta values for PM simulations
@@ -44,7 +44,7 @@ pi_hat <- 0.5
 
 # PM specific settings
 sigma <- c(0.8)# c(0.1, 0.4, 0.8)# Correlation parameter for the copula
-alternative_type <- "rough"          # Type of alternative hypothesis ("smooth" or "rough")
+alternative_type <- "smooth"          # Type of alternative hypothesis ("smooth" or "rough")
 sim_scenario <- "reduced"            # Simulation scenario ("reduced", "regular" or "HD10")
 
 
